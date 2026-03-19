@@ -3,6 +3,7 @@ module Architecture
 export AbstractCoupling,
     AbstractSubsystem,
     CapacitiveCoupling,
+    CircuitCapacitiveCoupling,
     CompositeSystem,
     Resonator,
     TunableCoupler,

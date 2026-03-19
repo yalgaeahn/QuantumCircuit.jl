@@ -8,11 +8,11 @@ groups.
 
 ## Current Status
 
-Status as of 2026-03-13:
+Status as of 2026-03-19:
 - Phase 1: complete
 - Phase 2: complete
 - Phase 2.5: complete
-- Phase 3A: in progress
+- Phase 3A: complete
 
 ## Phase 1: Static Core
 
@@ -188,7 +188,10 @@ Primary scope:
 - reusable observable specifications and expectation traces
 - static and time-dependent closed-system evolution via `sesolve`
 - typed dynamics result objects
-- one documented static or driven dynamics walkthrough
+- subsystem-local driven evolution
+- supported uncoupled circuit-mode closed-system workflows
+- time-dependent flux control for supported circuit-mode and single-device nonadiabatic effective workflows
+- one baseline dynamics walkthrough and one dedicated circuit-mode walkthrough
 
 Task sequence:
 
@@ -211,9 +214,9 @@ Task sequence:
 
 4. Tests and docs
 - add regression tests for free evolution of a static system
-- add regression tests for at least one driven closed-system example
-- add one notebook walkthrough for closed-system dynamics
-- document current limits around unsupported open-system features
+- add regression tests for driven, circuit-mode, and flux-control closed-system examples
+- add baseline and circuit-mode notebook walkthroughs for the documented APIs
+- keep unsupported open-system and coupled circuit-mode features explicit
 
 Dependencies:
 - requires stable Phase-1/2 models and completed Phase-2.5 analysis boundaries
@@ -223,6 +226,8 @@ Exit criteria:
 - `evolve(...)` runs closed-system dynamics through stable public APIs
 - named initial-state and observable helpers cover the documented examples
 - dynamics results are typed, documented, and test-covered
+- supported uncoupled circuit-mode and single-device flux-control workflows are regression-verified
+- the baseline and circuit-mode Phase 3A notebooks pass smoke verification
 
 See also:
 - `PHASE3A.md` for the implementation-level API and type design
@@ -308,6 +313,8 @@ Goal:
 - raise model fidelity and add subsystem families without disturbing the public architecture
 
 Primary scope:
+- exact circuit-mode capacitive coupling through `CircuitCapacitiveCoupling(...; G = ...)`
+- supported coupled exact circuit-mode local-drive and `FluxControl` workflows
 - higher-fidelity transmon variants
 - additional coupling models
 - performance work for larger composite Hilbert spaces
@@ -319,12 +326,20 @@ Task sequence:
 - add optional higher-fidelity subsystem models behind stable APIs
 - preserve the current Phase-1/2 workflows as the default path where appropriate
 
-2. Architecture extensions
-- add one new subsystem or interaction family through the existing layer boundaries
-- verify that new model features reuse existing simulation and analysis entry points
+2. Exact circuit coupling extension
+- add `CircuitCapacitiveCoupling(...; G = ...)` as the exact circuit-mode capacitive interaction declaration
+- keep `CapacitiveCoupling(...; g = ...)` as the effective-mode exchange declaration
+- support transmon-like↔transmon-like and resonator↔transmon-like pair families under `CircuitHamiltonianSpec`
+- keep resonator↔resonator exact circuit coupling explicitly unsupported until a later milestone
 
-3. Scaling and validation
+3. Coupled circuit workflows
+- support `:G` sweeps through the existing sweep path
+- support coupled exact circuit-mode local-drive dynamics and coupled `FluxControl` on the supported pair families
+- keep paper-derived effective time-dependent couplings such as `g(t)` and `ḡ(t)` out of scope for this milestone
+
+4. Scaling and validation
 - improve performance for larger systems where measurements justify it
+- add reference-style tests for exact circuit couplings, supported pair families, and coupled exact circuit flux behavior
 - add comparison tests between approximate and higher-fidelity models when possible
 
 Dependencies:
@@ -332,6 +347,7 @@ Dependencies:
 - should build on the same `CompositeSystem -> Model -> Simulation -> Analysis` flow
 
 Exit criteria:
+- exact circuit-mode capacitive coupling and supported coupled circuit workflows fit the existing architecture cleanly
 - new subsystem or interaction families fit the existing architecture cleanly
 - fidelity upgrades remain compatible with the package's public workflow
 

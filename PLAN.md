@@ -23,13 +23,14 @@ Primary device families:
 
 Primary interaction family:
 - `CapacitiveCoupling`
+- `CircuitCapacitiveCoupling`
 
 The focus is architecture-level modeling, not building a general-purpose solver
 library from scratch.
 
 The current model surface includes two explicit Hamiltonian representations:
 - `EffectiveHamiltonianSpec()` for the default Duffing-style effective model
-- `CircuitHamiltonianSpec(charge_cutoff = ...)` for the current uncoupled charge-basis circuit model
+- `CircuitHamiltonianSpec(charge_cutoff = ...)` for the charge-basis circuit model, including exact `CircuitCapacitiveCoupling(...; G = ...)` on supported pair families
 
 ## Document Roles
 
@@ -45,16 +46,15 @@ Status as of 2026-03-19:
 - Phase 1: complete
 - Phase 2: complete
 - Phase 2.5: complete
-- Phase 3A: in progress
-- Hamiltonian representation expansion: implemented, verification in progress
+- Phase 3A: complete
+- Phase 3B: next
 
-## Current Verification Priorities
+## Deferred After Phase 3A
 
-- verify that the default effective-mode workflows remain regression-stable
-- verify fixed and tunable circuit-mode spectra against reference expectations
-- verify circuit-mode sensitivity to `ng`, flux, and charge-cutoff convergence
-- verify circuit-mode closed-system dynamics and circuit-native operators on supported uncoupled systems
-- document and enforce current circuit-mode limits such as unsupported capacitive couplings and absent Schrieffer-Wolff reductions
+- Lindblad and steady-state workflows start in Phase 3B
+- exact circuit-mode resonator↔resonator coupling remains deferred
+- paper-derived effective time-dependent couplings such as `g(t)` and `ḡ(t)` remain deferred
+- Schrieffer-Wolff reductions and later-fidelity circuit extensions remain Phase 5 work
 
 ## Phase Plan
 
@@ -125,15 +125,21 @@ Goal:
 In scope:
 - Schrödinger time evolution through stable public APIs
 - reusable typed result objects for time-domain simulations
-- named initial-state helpers for composite systems
-- named observable helpers and expectation-value traces
-- narrowly scoped driven closed-system evolution built on model-layer Hamiltonian assembly
-- support for supported effective and circuit Hamiltonian specs through the same simulation entry points
+- named initial-state helpers through `basis_state(...)`
+- named observable specs and expectation-value trace helpers
+- narrowly scoped subsystem-local driven evolution through `SubsystemDrive`
+- supported circuit-mode closed-system workflows for uncoupled `CircuitHamiltonianSpec(charge_cutoff = ...)` systems
+- time-dependent flux control through `FluxControl`
+- nonadiabatic single-device effective flux workflows through `EffectiveHamiltonianSpec(NonadiabaticDuffingEffectiveMethod())`
+- documentation that separates supported circuit workflows from deferred coupled-circuit work
 
 Out of scope:
 - Lindblad dynamics
 - collapse-operator construction
 - steady-state workflows
+- circuit-mode capacitive couplings
+- coupled circuit-mode dynamics examples
+- nonadiabatic effective flux control for multi-subsystem or coupled systems
 - hardware execution backends
 - waveform compiler infrastructure
 
@@ -176,6 +182,8 @@ Goal:
 In scope:
 - stable Hamiltonian-spec APIs that separate effective Hilbert dimension from circuit charge cutoff
 - uncoupled circuit-Hamiltonian support for transmon-like subsystems and circuit-native operators
+- exact circuit-mode capacitive coupling through `CircuitCapacitiveCoupling(...; G = ...)` for transmon-like↔transmon-like and resonator↔transmon-like pairs
+- coupled exact circuit-mode local-drive and `FluxControl` workflows on supported pair families
 - verification of circuit-mode behavior through regression, convergence, and reference-style checks
 - higher-fidelity transmon modeling beyond the initial Duffing approximation
 - Schrieffer-Wolff-derived effective models when the underlying circuit path is ready
@@ -210,9 +218,11 @@ Phase 2.5 is complete when:
 
 Phase 3A is complete when:
 - closed-system evolution runs through stable public APIs
-- at least one documented dynamics example exists for a static or tunable system
+- at least one documented general dynamics example exists for a static or tunable system
+- at least one documented circuit-mode dynamics example exists for a supported uncoupled system
 - time-domain results follow the same typed-result conventions as spectrum and sweep workflows
 - named initial-state and observable helpers cover the documented workflows for supported model representations
+- docs explicitly distinguish supported circuit-mode workflows from deferred coupled-circuit features
 
 Phase 3B is complete when:
 - closed- and open-system evolution run through stable public APIs
@@ -227,6 +237,7 @@ Phase 4 is complete when:
 Phase 5 is complete when:
 - effective and circuit Hamiltonian specifications fit the existing `CompositeSystem -> Model -> Simulation -> Analysis` flow
 - circuit-mode transmon-like behavior is verified through regression tests and cutoff/reference checks
+- exact circuit-mode capacitive coupling and supported coupled circuit-mode flux workflows extend the existing architecture cleanly
 - higher-fidelity subsystem models fit the existing `CompositeSystem -> Model -> Simulation -> Analysis` flow
 - at least one next-step fidelity extension such as circuit-mode couplings, Schrieffer-Wolff reduction, or a new subsystem family extends the existing architecture cleanly
 - fidelity improvements preserve backward-compatible user workflows where feasible

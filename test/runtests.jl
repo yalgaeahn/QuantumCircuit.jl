@@ -3,6 +3,8 @@ using QuantumCircuit
 using QuantumToolbox: expect, eye
 
 effective_EJ(EJmax, flux, asymmetry) = EJmax * sqrt(cospi(flux)^2 + asymmetry^2 * sinpi(flux)^2)
+transition_01(system::CompositeSystem; kwargs...) = transition_frequencies(spectrum(system; levels = 4, kwargs...))[1]
+is_strictly_decreasing(values) = all(diff(values) .< 0)
 
 function exact_tunable_circuit_hamiltonian(model, target, subsystem)
     charge = charge_operator(model, target)
@@ -13,6 +15,14 @@ function exact_tunable_circuit_hamiltonian(model, target, subsystem)
     return 4 * subsystem.EC * offset_charge * offset_charge -
         subsystem.EJmax * cospi(subsystem.flux) * cosphi -
         subsystem.EJmax * subsystem.asymmetry * sinpi(subsystem.flux) * sinphi
+end
+
+function exact_charge_charge_circuit_coupling(model, source, target, G)
+    return G * charge_operator(model, source) * charge_operator(model, target)
+end
+
+function exact_resonator_charge_circuit_coupling(model, resonator, target, G)
+    return G * quadrature_operator(model, resonator, :x) * charge_operator(model, target)
 end
 
 @testset "Architecture layer" begin
@@ -68,11 +78,13 @@ end
     @test_throws ArgumentError Transmon(Symbol(""); EJ = 20.0, EC = 0.25)
     @test_throws ArgumentError Resonator(:r1; ω = -1.0, dim = 10)
     @test_throws ArgumentError CapacitiveCoupling(:q1, :q1; g = 0.09)
+    @test_throws ArgumentError CircuitCapacitiveCoupling(:q1, :q1; G = 0.09)
     @test_throws ArgumentError TunableTransmon(:tq1; EJmax = 20.0, EC = 0.25, asymmetry = 1.2)
     @test_throws ArgumentError TunableCoupler(:c1; EJmax = -15.0, EC = 0.30, flux = 0.0)
 
     @test TunableTransmon(:tq1; EJmax = 20.0, EC = 0.25, ng = 0.2).ng == 0.2
     @test TunableCoupler(:c1; EJmax = 15.0, EC = 0.30).ng == 0.0
+    @test CircuitCapacitiveCoupling(:q1, :q2; G = 0.05).G == 0.05
     @test EffectiveHamiltonianSpec().method isa DuffingEffectiveMethod
     @test CircuitHamiltonianSpec(charge_cutoff = 2).charge_cutoff == 2
     @test_throws UndefKeywordError CircuitHamiltonianSpec()
@@ -165,36 +177,121 @@ end
     @test_throws ArgumentError build_model(CompositeSystem(q1, r1, CapacitiveCoupling(:q1, :r1; g = 0.02)); hamiltonian_spec = CircuitHamiltonianSpec(charge_cutoff = 2))
 end
 
-@testset "Circuit Hamiltonian and operators" begin
+@testset "Circuit capacitive coupling" begin
     circuit_spec = CircuitHamiltonianSpec(charge_cutoff = 2)
+
+    q1 = Transmon(:q1; EJ = 20.0, EC = 0.25, ng = 0.05, ncut = 5)
+    q2 = TunableCoupler(:q2; EJmax = 15.0, EC = 0.30, flux = 0.08, asymmetry = 0.10, ng = 0.0, ncut = 5)
+    qq_coupling = CircuitCapacitiveCoupling(:q1, :q2; G = 0.015)
+    qq_uncoupled_model = build_model(CompositeSystem(q1, q2); hamiltonian_spec = circuit_spec)
+    qq_model = build_model(CompositeSystem(q1, q2, qq_coupling); hamiltonian_spec = circuit_spec)
+    qq_expected = hamiltonian(qq_uncoupled_model) + exact_charge_charge_circuit_coupling(qq_model, :q1, :q2, qq_coupling.G)
+    @test hamiltonian(qq_model).data ≈ qq_expected.data atol = 1e-10
+
+    q = Transmon(:q; EJ = 20.0, EC = 0.25, ng = 0.05, ncut = 5)
+    r = Resonator(:r; ω = 6.2, dim = 3)
+    qr_coupling = CircuitCapacitiveCoupling(:q, :r; G = 0.03)
+    qr_uncoupled_model = build_model(CompositeSystem(q, r); hamiltonian_spec = circuit_spec)
+    qr_model = build_model(CompositeSystem(q, r, qr_coupling); hamiltonian_spec = circuit_spec)
+    qr_expected = hamiltonian(qr_uncoupled_model) + exact_resonator_charge_circuit_coupling(qr_model, :r, :q, qr_coupling.G)
+    @test hamiltonian(qr_model).data ≈ qr_expected.data atol = 1e-10
+
+    migrated_error =
+        try
+            build_model(CompositeSystem(q, r, CapacitiveCoupling(:q, :r; g = 0.02)); hamiltonian_spec = circuit_spec)
+            nothing
+        catch err
+            err
+        end
+    @test migrated_error isa ArgumentError
+    @test occursin("CircuitCapacitiveCoupling", sprint(showerror, migrated_error))
+
+    effective_error =
+        try
+            build_model(CompositeSystem(q, r, qr_coupling))
+            nothing
+        catch err
+            err
+        end
+    @test effective_error isa ArgumentError
+    @test occursin("CircuitHamiltonianSpec", sprint(showerror, effective_error))
+
+    r2 = Resonator(:r2; ω = 6.8, dim = 2)
+    rr_error =
+        try
+            build_model(CompositeSystem(r, r2, CircuitCapacitiveCoupling(:r, :r2; G = 0.02)); hamiltonian_spec = circuit_spec)
+            nothing
+        catch err
+            err
+        end
+    @test rr_error isa ArgumentError
+    @test occursin("between resonators", sprint(showerror, rr_error))
+
+    g_sweep = simulate_sweep(
+        CompositeSystem(q, r, qr_coupling),
+        SweepSpec(:q, :r, :G, [0.01, 0.05]; levels = 5);
+        hamiltonian_spec = circuit_spec,
+    )
+    @test g_sweep.values == [0.01, 0.05]
+    @test length(g_sweep.spectra) == 2
+    @test g_sweep.spectra[1].energies != g_sweep.spectra[2].energies
+
+    shifted_sys = with_coupling_parameter(CompositeSystem(q, r, qr_coupling), :q, :r, :G, 0.05)
+    @test couplings(shifted_sys)[1].G == 0.05
+
+    tq = TunableTransmon(:tq; EJmax = 20.0, EC = 0.25, flux = 0.12, asymmetry = 0.20, ng = 0.05, ncut = 6)
+    mixed_spec = spectrum(
+        CompositeSystem(tq, r, CircuitCapacitiveCoupling(:tq, :r; G = 0.025));
+        levels = 5,
+        hamiltonian_spec = CircuitHamiltonianSpec(charge_cutoff = 3),
+    )
+    @test length(mixed_spec.energies) == 5
+end
+
+@testset "Circuit Hamiltonian and operators" begin
+    reference_spec = CircuitHamiltonianSpec(charge_cutoff = 3)
+    operator_spec = CircuitHamiltonianSpec(charge_cutoff = 2)
     q_ng0 = Transmon(:q; EJ = 20.0, EC = 0.25, ng = 0.0, ncut = 6)
     q_ng1 = Transmon(:q; EJ = 20.0, EC = 0.25, ng = 0.25, ncut = 6)
 
     effective_spec0 = spectrum(CompositeSystem(q_ng0); levels = 4)
     effective_spec1 = spectrum(CompositeSystem(q_ng1); levels = 4)
-    circuit_spec0 = spectrum(CompositeSystem(q_ng0); levels = 4, hamiltonian_spec = circuit_spec)
-    circuit_spec1 = spectrum(CompositeSystem(q_ng1); levels = 4, hamiltonian_spec = circuit_spec)
+    circuit_f01_ng0 = transition_01(CompositeSystem(q_ng0); hamiltonian_spec = reference_spec)
+    circuit_f01_ng1 = transition_01(CompositeSystem(q_ng1); hamiltonian_spec = reference_spec)
 
     @test effective_spec0.energies ≈ effective_spec1.energies atol = 1e-10
-    @test circuit_spec0.energies != circuit_spec1.energies
+    @test abs(circuit_f01_ng1 - circuit_f01_ng0) > 1e-2
 
-    tq_flux0 = TunableTransmon(:tq; EJmax = 20.0, EC = 0.25, flux = 0.0, asymmetry = 0.0, ng = 0.0, ncut = 6)
-    tq_flux1 = TunableTransmon(:tq; EJmax = 20.0, EC = 0.25, flux = 0.25, asymmetry = 0.0, ng = 0.0, ncut = 6)
-    @test transition_frequencies(spectrum(CompositeSystem(tq_flux1); levels = 4, hamiltonian_spec = circuit_spec))[1] <
-        transition_frequencies(spectrum(CompositeSystem(tq_flux0); levels = 4, hamiltonian_spec = circuit_spec))[1]
+    symmetric_fluxes = [0.0, 0.12, 0.24, 0.36]
+    symmetric_f01 = [
+        transition_01(
+            CompositeSystem(TunableTransmon(:tq; EJmax = 20.0, EC = 0.25, flux = flux, asymmetry = 0.0, ng = 0.0, ncut = 6));
+            hamiltonian_spec = reference_spec,
+        ) for flux in symmetric_fluxes
+    ]
+    @test is_strictly_decreasing(symmetric_f01)
+
+    convergence_tq = TunableTransmon(:tq_conv; EJmax = 20.0, EC = 0.25, flux = 0.12, asymmetry = 0.20, ng = 0.05, ncut = 6)
+    cutoff_f01 = [
+        transition_01(CompositeSystem(convergence_tq); hamiltonian_spec = CircuitHamiltonianSpec(charge_cutoff = cutoff))
+        for cutoff in 3:5
+    ]
+    cutoff_corrections = abs.(diff(cutoff_f01))
+    @test cutoff_corrections[2] < cutoff_corrections[1]
+    @test abs(cutoff_f01[3] - cutoff_f01[2]) < 0.1
 
     resonator = Resonator(:r1; ω = 1.25, dim = 4)
-    @test spectrum(CompositeSystem(resonator); levels = 4, hamiltonian_spec = circuit_spec).energies ≈
+    @test spectrum(CompositeSystem(resonator); levels = 4, hamiltonian_spec = operator_spec).energies ≈
         spectrum(CompositeSystem(resonator); levels = 4).energies atol = 1e-10
 
     tq_asym = TunableTransmon(:tq_asym; EJmax = 21.0, EC = 0.23, flux = 0.17, asymmetry = 0.35, ng = 0.15, ncut = 6)
-    tq_asym_model = build_model(CompositeSystem(tq_asym); hamiltonian_spec = circuit_spec)
+    tq_asym_model = build_model(CompositeSystem(tq_asym); hamiltonian_spec = reference_spec)
     expected_tq_asym = exact_tunable_circuit_hamiltonian(tq_asym_model, :tq_asym, tq_asym)
     @test hamiltonian(tq_asym_model).data ≈ expected_tq_asym.data atol = 1e-10
 
-    circuit_model = build_model(CompositeSystem(q_ng0); hamiltonian_spec = circuit_spec)
+    circuit_model = build_model(CompositeSystem(q_ng0); hamiltonian_spec = operator_spec)
     effective_model = build_model(CompositeSystem(q_ng0))
-    resonator_model = build_model(CompositeSystem(resonator); hamiltonian_spec = circuit_spec)
+    resonator_model = build_model(CompositeSystem(resonator); hamiltonian_spec = operator_spec)
 
     @test size(charge_operator(circuit_model, :q).data) == (5, 5)
     @test size(cosphi_operator(circuit_model, :q).data) == (5, 5)
@@ -310,6 +407,109 @@ end
         short_tlist;
         flux_controls = [FluxControl(:effective_bad, :q, (p, t) -> 0.01)],
     )
+end
+
+@testset "Coupled circuit capacitive dynamics and flux control" begin
+    drive_spec = CircuitHamiltonianSpec(charge_cutoff = 2)
+    q = Transmon(:q; EJ = 20.0, EC = 0.25, ng = 0.05, ncut = 5)
+    r = Resonator(:r; ω = 6.2, dim = 3)
+    drive_sys = CompositeSystem(q, r, CircuitCapacitiveCoupling(:q, :r; G = 0.03))
+    ψ0_drive = basis_state(drive_sys; hamiltonian_spec = drive_spec, q = 0, r = 0)
+    drive_tlist = collect(range(0.0, 8.0; length = 161))
+    drive_observables = [ObservableSpec(:nr, :r, :n), ObservableSpec(:charge_q, :q, :charge)]
+    baseline = evolve(
+        drive_sys,
+        ψ0_drive,
+        drive_tlist;
+        hamiltonian_spec = drive_spec,
+        observables = drive_observables,
+    )
+    drive = SubsystemDrive(
+        :r_drive,
+        :r,
+        :x,
+        (p, t) -> p.Ω * cos(p.ωd * t),
+    )
+    driven = evolve(
+        drive_sys,
+        ψ0_drive,
+        drive_tlist;
+        hamiltonian_spec = drive_spec,
+        drives = [drive],
+        observables = drive_observables,
+        params = (; Ω = 0.18, ωd = 6.2),
+    )
+    @test maximum(abs.(real.(observable_trace(driven, :charge_q).values) .- real.(observable_trace(baseline, :charge_q).values))) > 1e-2
+    @test maximum(real.(observable_trace(driven, :nr).values)) > 1e-2
+    @test maximum(population_trace(driven, :q, 1).values) > 1e-2
+
+    flux_spec = CircuitHamiltonianSpec(charge_cutoff = 3)
+    tq = TunableTransmon(:q; EJmax = 20.0, EC = 0.25, flux = 0.12, asymmetry = 0.20, ng = 0.05, ncut = 6)
+    flux_resonator = Resonator(:r; ω = 6.0, dim = 2)
+    flux_sys = CompositeSystem(tq, flux_resonator, CircuitCapacitiveCoupling(:q, :r; G = 0.025))
+    ψ0_flux = basis_state(flux_sys; hamiltonian_spec = flux_spec, q = 0, r = 0)
+    short_tlist = collect(range(0.0, 2.0; length = 21))
+    flux_observables = [ObservableSpec(:charge_q, :q, :charge), ObservableSpec(:nr, :r, :n)]
+    zero_control = FluxControl(:zero_flux, :q, (p, t) -> 0.0)
+
+    flux_baseline = evolve(
+        flux_sys,
+        ψ0_flux,
+        short_tlist;
+        hamiltonian_spec = flux_spec,
+        observables = flux_observables,
+    )
+    zero_result = evolve(
+        flux_sys,
+        ψ0_flux,
+        short_tlist;
+        hamiltonian_spec = flux_spec,
+        observables = flux_observables,
+        flux_controls = [zero_control],
+    )
+    @test observable_trace(zero_result, :charge_q).values ≈ observable_trace(flux_baseline, :charge_q).values atol = 1e-4
+    @test observable_trace(zero_result, :nr).values ≈ observable_trace(flux_baseline, :nr).values atol = 1e-4
+
+    constant_shift = 0.05
+    constant_control = FluxControl(:constant_flux, :q, (p, t) -> constant_shift)
+    shifted_sys = with_subsystem_parameter(flux_sys, :q, :flux, tq.flux + constant_shift)
+    shifted_result = evolve(
+        shifted_sys,
+        basis_state(shifted_sys; hamiltonian_spec = flux_spec, q = 0, r = 0),
+        short_tlist;
+        hamiltonian_spec = flux_spec,
+        observables = flux_observables,
+    )
+    constant_result = evolve(
+        flux_sys,
+        ψ0_flux,
+        short_tlist;
+        hamiltonian_spec = flux_spec,
+        observables = flux_observables,
+        flux_controls = [constant_control],
+    )
+    @test observable_trace(constant_result, :charge_q).values ≈ observable_trace(shifted_result, :charge_q).values atol = 1e-4
+    @test observable_trace(constant_result, :nr).values ≈ observable_trace(shifted_result, :nr).values atol = 1e-4
+
+    flux_pulse = FluxControl(
+        :flux_pulse,
+        :q,
+        (p, t) -> p.δ * sin(p.ω * t);
+        derivative = (p, t) -> p.δ * p.ω * cos(p.ω * t),
+    )
+    long_tlist = collect(range(0.0, 12.0; length = 161))
+    pulsed_result = evolve(
+        flux_sys,
+        ψ0_flux,
+        long_tlist;
+        hamiltonian_spec = flux_spec,
+        observables = flux_observables,
+        flux_controls = [flux_pulse],
+        params = (; δ = 0.08, ω = 5.6),
+    )
+    @test maximum(abs.(real.(observable_trace(pulsed_result, :charge_q).values))) > 1e-4
+    @test maximum(real.(observable_trace(pulsed_result, :nr).values)) > 1e-4
+    @test maximum(population_trace(pulsed_result, :q, 1).values) > 1e-4
 end
 
 @testset "Circuit sweeps and dynamics" begin
@@ -689,6 +889,18 @@ end
     @test_throws ArgumentError evolve(
         coupled_sys,
         coupled_ψ0,
+        [0.0, 0.1];
+        hamiltonian_spec = nonadiabatic_spec,
+        flux_controls = [flux_pulse],
+        params = (; δ = 0.01, ωf = 1.0),
+    )
+
+    other_tunable = TunableCoupler(:c; EJmax = 15.0, EC = 0.30, flux = 0.05, asymmetry = 0.10, ncut = 3)
+    uncoupled_multi_sys = CompositeSystem(tq, other_tunable)
+    uncoupled_multi_ψ0 = basis_state(uncoupled_multi_sys; hamiltonian_spec = nonadiabatic_spec, q = 0, c = 0)
+    @test_throws ArgumentError evolve(
+        uncoupled_multi_sys,
+        uncoupled_multi_ψ0,
         [0.0, 0.1];
         hamiltonian_spec = nonadiabatic_spec,
         flux_controls = [flux_pulse],

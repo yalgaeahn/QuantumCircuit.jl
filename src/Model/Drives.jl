@@ -118,8 +118,6 @@ function _validate_flux_controls(
     flux_controls::Vector{FluxControl},
     ::CircuitHamiltonianSpec,
 )
-    isempty(couplings(model.system)) ||
-        throw(ArgumentError("FluxControl currently supports only uncoupled systems in circuit mode."))
     return nothing
 end
 

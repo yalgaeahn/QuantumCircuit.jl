@@ -36,6 +36,7 @@ Couplings represent interactions between named subsystems.
 
 Examples:
 - `CapacitiveCoupling`
+- `CircuitCapacitiveCoupling`
 
 ### System Container
 
@@ -54,6 +55,7 @@ Examples:
 Phase 1 uses a shared frequency-unit convention with `ħ = 1`.
 
 - `EJ`, `EC`, resonator `ω`, and coupling `g` must all use the same unit
+- exact circuit coupling `G` follows the same shared unit convention
 - Hamiltonian eigenvalues and derived transition frequencies use that same unit
 - the example notebooks use `GHz`
 - `ncut` and `dim` are dimensionless truncation sizes
@@ -78,6 +80,7 @@ Public examples:
 - `Resonator`
 - `TunableCoupler`
 - `CapacitiveCoupling`
+- `CircuitCapacitiveCoupling`
 - `CompositeSystem`
 
 Must not own:
@@ -106,7 +109,8 @@ Contract:
 - the returned object is the canonical handoff from Model to Simulation
 - the default effective transmon model uses a Duffing approximation derived from `EJ` and `EC`
 - circuit-mode transmon-like models use an explicit charge-basis Hamiltonian with a separate charge cutoff
-- circuit-mode capacitive couplings are intentionally unsupported until a dedicated circuit-coupling model exists
+- `CapacitiveCoupling(...; g = ...)` remains the effective-mode exchange interaction declaration
+- `CircuitCapacitiveCoupling(...; G = ...)` is the exact circuit-mode capacitive interaction declaration for supported pair families
 
 Must not own:
 - eigensolver execution
@@ -231,7 +235,7 @@ The exact file split can change. The layer boundaries above should not.
 Recommended public type categories:
 
 - subsystem types: `Transmon`, `TunableTransmon`, `Resonator`, `TunableCoupler`
-- coupling types: `CapacitiveCoupling`
+- coupling types: `CapacitiveCoupling`, `CircuitCapacitiveCoupling`
 - composition type: `CompositeSystem`
 - sweep types: `SweepSpec`, `SubsystemSweepTarget`, `CouplingSweepTarget`
 - result types: `SpectrumResult`, `SweepResult`, `DynamicsResult`

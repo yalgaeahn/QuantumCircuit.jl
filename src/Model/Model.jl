@@ -6,6 +6,7 @@ using ..Architecture:
     AbstractCoupling,
     AbstractSubsystem,
     CapacitiveCoupling,
+    CircuitCapacitiveCoupling,
     CompositeSystem,
     Resonator,
     TunableCoupler,
@@ -113,7 +114,7 @@ function build_model(system::CompositeSystem; hamiltonian_spec::AbstractHamilton
     end
 
     for coupling in couplings(system)
-        H += _coupling_hamiltonian(coupling, operator_cache, hamiltonian_spec)
+        H += _coupling_hamiltonian(coupling, system, operator_cache, hamiltonian_spec)
     end
 
     return StaticSystemModel(
@@ -130,16 +131,26 @@ function hamiltonian(system::CompositeSystem; hamiltonian_spec::AbstractHamilton
     return hamiltonian(build_model(system; hamiltonian_spec = hamiltonian_spec))
 end
 
-_validate_hamiltonian_spec(::CompositeSystem, ::Vector{<:AbstractSubsystem}, ::EffectiveHamiltonianSpec) = nothing
+function _validate_hamiltonian_spec(
+    system::CompositeSystem,
+    ::Vector{<:AbstractSubsystem},
+    ::EffectiveHamiltonianSpec,
+)
+    for coupling in couplings(system)
+        coupling isa CapacitiveCoupling && continue
+        coupling isa CircuitCapacitiveCoupling &&
+            throw(ArgumentError("CircuitCapacitiveCoupling(...; G = ...) requires CircuitHamiltonianSpec(...)."))
+        throw(ArgumentError("Unsupported coupling type $(typeof(coupling))."))
+    end
+
+    return nothing
+end
 
 function _validate_hamiltonian_spec(
     system::CompositeSystem,
     subsystem_list::Vector{<:AbstractSubsystem},
     hamiltonian_spec::CircuitHamiltonianSpec,
 )
-    isempty(couplings(system)) ||
-        throw(ArgumentError("CircuitHamiltonianSpec does not support capacitive couplings yet; use an uncoupled system or EffectiveHamiltonianSpec()."))
-
     subsystem_by_name = Dict(name(subsystem) => subsystem for subsystem in subsystem_list)
     for subsystem_name in keys(hamiltonian_spec.charge_cutoffs)
         subsystem = get(subsystem_by_name, subsystem_name, nothing)
@@ -153,7 +164,56 @@ function _validate_hamiltonian_spec(
             )
     end
 
+    for coupling in couplings(system)
+        _validate_circuit_coupling(coupling, subsystem_by_name)
+    end
+
     return nothing
+end
+
+function _validate_circuit_coupling(
+    coupling::CapacitiveCoupling,
+    subsystem_by_name::Dict{Symbol, <:AbstractSubsystem},
+)
+    throw(
+        ArgumentError(
+            "CapacitiveCoupling(...; g = ...) is only supported with EffectiveHamiltonianSpec(). Use CircuitCapacitiveCoupling(...; G = ...) with CircuitHamiltonianSpec().",
+        ),
+    )
+end
+
+function _validate_circuit_coupling(
+    coupling::CircuitCapacitiveCoupling,
+    subsystem_by_name::Dict{Symbol, <:AbstractSubsystem},
+)
+    source, target = coupling_endpoints(coupling)
+    source_subsystem = subsystem_by_name[source]
+    target_subsystem = subsystem_by_name[target]
+
+    source_subsystem isa Resonator && target_subsystem isa Resonator &&
+        throw(ArgumentError("CircuitCapacitiveCoupling between resonators is not implemented yet."))
+
+    _supports_exact_circuit_coupling(source_subsystem, target_subsystem) ||
+        throw(
+            ArgumentError(
+                "CircuitCapacitiveCoupling under CircuitHamiltonianSpec supports only transmon-like↔transmon-like and resonator↔transmon-like pairs.",
+            ),
+        )
+
+    return nothing
+end
+
+function _validate_circuit_coupling(
+    coupling::AbstractCoupling,
+    subsystem_by_name::Dict{Symbol, <:AbstractSubsystem},
+)
+    throw(ArgumentError("Unsupported coupling type $(typeof(coupling)) under CircuitHamiltonianSpec."))
+end
+
+function _supports_exact_circuit_coupling(source::AbstractSubsystem, target::AbstractSubsystem)
+    return (source isa _CircuitChargeSubsystem && target isa _CircuitChargeSubsystem) ||
+        (source isa Resonator && target isa _CircuitChargeSubsystem) ||
+        (source isa _CircuitChargeSubsystem && target isa Resonator)
 end
 
 _local_dimension(subsystem::Transmon, ::EffectiveHamiltonianSpec) = subsystem.ncut
@@ -366,6 +426,7 @@ end
 
 function _coupling_hamiltonian(
     coupling::CapacitiveCoupling,
+    system::CompositeSystem,
     operator_cache::_OperatorCache,
     ::EffectiveHamiltonianSpec,
 )
@@ -379,14 +440,73 @@ end
 
 function _coupling_hamiltonian(
     coupling::CapacitiveCoupling,
+    system::CompositeSystem,
     operator_cache::_OperatorCache,
     ::CircuitHamiltonianSpec,
 )
-    throw(ArgumentError("CircuitHamiltonianSpec does not support capacitive couplings yet."))
+    throw(
+        ArgumentError(
+            "CapacitiveCoupling(...; g = ...) is only supported with EffectiveHamiltonianSpec(). Use CircuitCapacitiveCoupling(...; G = ...) with CircuitHamiltonianSpec().",
+        ),
+    )
 end
 
-function _coupling_hamiltonian(coupling::AbstractCoupling, operator_cache::_OperatorCache, ::AbstractHamiltonianSpec)
+function _coupling_hamiltonian(
+    coupling::CircuitCapacitiveCoupling,
+    system::CompositeSystem,
+    operator_cache::_OperatorCache,
+    ::CircuitHamiltonianSpec,
+)
+    source, target = coupling_endpoints(coupling)
+    source_subsystem = _subsystem(system, source)
+    target_subsystem = _subsystem(system, target)
+
+    if source_subsystem isa _CircuitChargeSubsystem && target_subsystem isa _CircuitChargeSubsystem
+        source_charge = _cached_operator(operator_cache, source, :charge)
+        target_charge = _cached_operator(operator_cache, target, :charge)
+        return coupling.G * source_charge * target_charge
+    elseif source_subsystem isa Resonator && target_subsystem isa _CircuitChargeSubsystem
+        source_x = _cached_operator(operator_cache, source, :x)
+        target_charge = _cached_operator(operator_cache, target, :charge)
+        return coupling.G * source_x * target_charge
+    elseif source_subsystem isa _CircuitChargeSubsystem && target_subsystem isa Resonator
+        source_charge = _cached_operator(operator_cache, source, :charge)
+        target_x = _cached_operator(operator_cache, target, :x)
+        return coupling.G * source_charge * target_x
+    elseif source_subsystem isa Resonator && target_subsystem isa Resonator
+        throw(ArgumentError("CircuitCapacitiveCoupling between resonators is not implemented yet."))
+    end
+
+    throw(
+        ArgumentError(
+            "CircuitCapacitiveCoupling under CircuitHamiltonianSpec supports only transmon-like↔transmon-like and resonator↔transmon-like pairs.",
+        ),
+    )
+end
+
+function _coupling_hamiltonian(
+    coupling::CircuitCapacitiveCoupling,
+    system::CompositeSystem,
+    operator_cache::_OperatorCache,
+    ::EffectiveHamiltonianSpec,
+)
+    throw(ArgumentError("CircuitCapacitiveCoupling(...; G = ...) requires CircuitHamiltonianSpec(...)."))
+end
+
+function _coupling_hamiltonian(
+    coupling::AbstractCoupling,
+    system::CompositeSystem,
+    operator_cache::_OperatorCache,
+    ::AbstractHamiltonianSpec,
+)
     throw(ArgumentError("Unsupported coupling type $(typeof(coupling))."))
+end
+
+function _cached_operator(operator_cache::_OperatorCache, target::Symbol, operator::Symbol)
+    embedded_operator = get(operator_cache, (target, operator), nothing)
+    embedded_operator === nothing &&
+        throw(ArgumentError("Missing embedded operator $operator for subsystem $target."))
+    return embedded_operator
 end
 
 function _effective_josephson_energy(subsystem::Union{TunableTransmon, TunableCoupler})
@@ -458,6 +578,14 @@ function _subsystem(model::StaticSystemModel, target::Symbol)
     end
 
     throw(ArgumentError("No subsystem named $target exists in the model."))
+end
+
+function _subsystem(system::CompositeSystem, target::Symbol)
+    for subsystem in subsystems(system)
+        name(subsystem) == target && return subsystem
+    end
+
+    throw(ArgumentError("No subsystem named $target exists in the system."))
 end
 
 include("Operators.jl")

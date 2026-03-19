@@ -7,23 +7,27 @@ Current scope:
 - fixed and flux-tunable subsystem declarations
 - composite-system Hamiltonian construction
 - explicit effective and circuit Hamiltonian specifications
+- exact circuit-mode capacitive coupling through `CircuitCapacitiveCoupling(...; G = ...)` for transmon-like↔transmon-like and resonator↔transmon-like pairs
 - low-lying eigenspectra
 - parameter sweeps
 - result-driven spectrum and sweep analysis
 - closed-system time evolution
-- subsystem-local driven evolution for the first Phase 3A workflows
+- subsystem-local driven closed-system evolution
+- supported time-dependent flux control for exact circuit-mode workflows and the single-device nonadiabatic effective workflow
 
 Not yet in scope:
 - Lindblad or steady-state workflows
+- exact circuit-mode resonator↔resonator coupling
+- paper-derived effective time-dependent couplings such as `g(t)` and `ḡ(t)`
 - automatic circuit quantization
 
 ## Project Status
 
-Status as of 2026-03-13:
+Status as of 2026-03-19:
 - Phase 1: complete
 - Phase 2: complete
 - Phase 2.5: complete
-- Phase 3A: in progress
+- Phase 3A: complete
 
 ## Quickstart
 
@@ -35,13 +39,16 @@ The examples below use a shared frequency unit such as `GHz`.
 - `output/jupyter-notebook/phase2-tunable-sweep-walkthrough.ipynb`: Phase 2 tunable sweep walkthrough with the current Analysis helpers.
 - `output/jupyter-notebook/phase2-analysis-recipes.ipynb`: focused recipes for reading `SweepResult`, `SweepSeries`, and `SweepSummary`.
 - `output/jupyter-notebook/phase3a-closed-system-dynamics-walkthrough.ipynb`: Phase 3A closed-system dynamics walkthrough with `basis_state`, `ObservableSpec`, `SubsystemDrive`, and `evolve`.
+- `output/jupyter-notebook/phase3a-circuit-hamiltonian-dynamics.ipynb`: supported uncoupled circuit-Hamiltonian walkthrough with `CircuitHamiltonianSpec`, circuit-native operators, basis states, dynamics, and `FluxControl`.
+- `output/jupyter-notebook/phase5-circuit-capacitive-coupling-walkthrough.ipynb`: coupled exact circuit-Hamiltonian walkthrough with `CircuitCapacitiveCoupling`, `:G` sweeps, local-drive transfer, and coupled `FluxControl`.
 - `output/jupyter-notebook/phase3a-drive-dynamics-recipes.ipynb`: focused drive-dynamics recipes for comparing undriven and driven closed-system evolution.
 - `output/jupyter-notebook/phase3a-detuning-and-coupled-response.ipynb`: single-mode drive detuning notebook with a short coupled-response extension.
 - `output/jupyter-notebook/phase3a-fixed-qubit-coupler-resonator-dynamics.ipynb`: mixed `Transmon - TunableCoupler - Resonator` dynamics walkthrough with static flux selection and transferred resonator response.
 - `output/jupyter-notebook/phase3a-tunable-coupler-two-qubit-dynamics.ipynb`: mixed `TunableTransmon - TunableCoupler - Transmon` dynamics and population-transfer walkthrough.
 
 The Phase 3A dynamics notebooks use `UnicodePlots.jl` for lightweight inline plots inside the notebooks.
-Use `phase3a-detuning-and-coupled-response.ipynb` for drive-detuning intuition, `phase3a-fixed-qubit-coupler-resonator-dynamics.ipynb` for fixed-qubit transfer into a resonator, and `phase3a-tunable-coupler-two-qubit-dynamics.ipynb` for mixed two-qubit transfer.
+Use `phase3a-closed-system-dynamics-walkthrough.ipynb` for the baseline dynamics API, `phase3a-circuit-hamiltonian-dynamics.ipynb` for uncoupled charge-basis workflows and circuit-native operators, `phase5-circuit-capacitive-coupling-walkthrough.ipynb` for exact coupled circuit-mode capacitive workflows, `phase3a-detuning-and-coupled-response.ipynb` for drive-detuning intuition, `phase3a-fixed-qubit-coupler-resonator-dynamics.ipynb` for fixed-qubit transfer into a resonator, and `phase3a-tunable-coupler-two-qubit-dynamics.ipynb` for mixed two-qubit transfer.
+Smoke-check the two canonical Phase 3A notebooks with `python3 scripts/smoke_phase3a_notebooks.py`.
 
 ### 1. Static transmon spectrum
 
@@ -190,9 +197,12 @@ p1 = population_trace(result, :r1, 1)
 ## Modeling Notes
 
 - The default transmon and tunable-device path uses a Duffing-style effective Hamiltonian through `EffectiveHamiltonianSpec()`.
-- `CircuitHamiltonianSpec(charge_cutoff = N)` builds an uncoupled charge-basis Hamiltonian for transmon-like subsystems with Hilbert dimension `2N + 1`.
-- `EJ`, `EC`, resonator `ω`, and coupling `g` should share the same frequency unit.
+- `CircuitHamiltonianSpec(charge_cutoff = N)` builds a charge-basis Hamiltonian with Hilbert dimension `2N + 1` for each transmon-like subsystem and supports exact circuit-mode couplings through `CircuitCapacitiveCoupling(...; G = ...)`.
+- `EJ`, `EC`, resonator `ω`, effective coupling `g`, and exact circuit coupling `G` should share the same frequency unit.
 - `flux` is interpreted as reduced flux `Phi/Phi0`.
 - subsystem `ncut` remains the effective-model Hilbert dimension; circuit-mode charge cutoff is configured separately on `CircuitHamiltonianSpec`.
 - `ng` is used in circuit mode for `Transmon`, `TunableTransmon`, and `TunableCoupler`.
-- circuit-mode capacitive couplings are not implemented yet; use `EffectiveHamiltonianSpec()` for coupled systems.
+- `FluxControl(...)` is available for supported exact circuit-mode workflows and for the single-device nonadiabatic effective workflow.
+- `CapacitiveCoupling(...; g = ...)` remains the effective-mode exchange coupling; use `CircuitCapacitiveCoupling(...; G = ...)` for exact circuit mode.
+- supported exact circuit-mode pair families are transmon-like↔transmon-like and resonator↔transmon-like; resonator↔resonator remains out of scope.
+- `output/jupyter-notebook/phase3a-circuit-hamiltonian-dynamics.ipynb` is the primary uncoupled circuit-mode walkthrough, and `output/jupyter-notebook/phase5-circuit-capacitive-coupling-walkthrough.ipynb` is the primary coupled exact-circuit walkthrough.

@@ -1,0 +1,84 @@
+paper = "Renger et al. (2026)"
+scope = "Local single-device priors for QB1-TC1-CR-TC2-QB2"
+notes = "Qubit fits are frozen local priors. Coupler fits are weakly identified and intended only as initialization for later coupled-model fitting."
+schema = "paper_local_priors_v1"
+source_notebook = "output/jupyter-notebook/renger2026-parameter-inference.ipynb"
+
+[devices.QB2]
+ncut = 15
+residual_f01_mhz = -0.21
+anharmonicity_ghz = -0.22492
+EC = 0.200581395349
+EJmax = 13.65
+flux = 0.0
+ng = 0.0
+charge_cutoff = 10
+asymmetry = 0.1
+type = "TunableTransmon"
+fit_classification = "identified"
+f01_ghz = 4.46979
+
+[devices.TC2]
+ncut = 13
+residual_alpha_mhz = 0.01
+anharmonicity_ghz = -0.10999
+EC = 0.105
+EJmax = 34.25
+flux = 0.0
+ng = 0.0
+charge_cutoff = 10
+asymmetry = 0.1
+type = "TunableCoupler"
+fit_classification = "weakly identified"
+f01_ghz = 5.25661
+
+[devices.TC1]
+ncut = 13
+residual_alpha_mhz = 0.01
+anharmonicity_ghz = -0.10999
+EC = 0.105
+EJmax = 34.25
+flux = 0.0
+ng = 0.0
+charge_cutoff = 10
+asymmetry = 0.1
+type = "TunableCoupler"
+fit_classification = "weakly identified"
+f01_ghz = 5.25661
+
+[devices.QB1]
+ncut = 15
+residual_f01_mhz = 0.66
+anharmonicity_ghz = -0.22225
+EC = 0.199460916442
+EJmax = 14.92
+flux = 0.0
+ng = 0.0
+charge_cutoff = 10
+asymmetry = 0.1
+type = "TunableTransmon"
+fit_classification = "identified"
+f01_ghz = 4.67066
+
+[inference]
+qubit_fit_classification = "identified"
+coupler_fit_classification = "weakly identified"
+hamiltonian_spec = "CircuitHamiltonianSpec(charge_cutoff = 10)"
+sweet_spot_flux_target = 0.0
+asymmetry_prior_center = 0.1
+
+[targets]
+qb1_ec_ghz = 0.19946091644204852
+beta_qc_qb2 = 0.022
+beta_cr = 0.0225
+beta_qc_qb1 = 0.017
+qb2_f01_ghz = 4.47
+qb2_ej_over_ec = 68.8
+qb1_ej_ghz = 14.8
+qb2_ec_ghz = 0.20058139534883723
+qb1_ej_over_ec = 74.2
+beta_qr = 0.002
+coupler_alpha_prior_ghz = -0.11
+qb2_ej_ghz = 13.8
+cr_f01_ghz = 4.22
+qb1_f01_ghz = 4.67

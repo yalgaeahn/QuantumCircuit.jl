@@ -14,6 +14,8 @@ Deliver a stable public API for:
 - named observable specification
 - closed-system time evolution
 - narrow driven evolution for subsystem-local drives
+- supported uncoupled circuit-mode closed-system workflows
+- time-dependent flux control for supported circuit and single-device effective workflows
 - typed time-domain results that fit the existing `Model -> Simulation -> Analysis` flow
 
 ## Non-Goals
@@ -23,6 +25,9 @@ Not part of Phase 3A:
 - collapse operators
 - steady-state solvers
 - stochastic trajectories
+- circuit-mode capacitive couplings
+- coupled circuit-mode dynamics examples
+- nonadiabatic effective flux control for multi-subsystem or coupled systems
 - pulse scheduling
 - calibration loops
 - branch-tracking analysis
@@ -58,7 +63,7 @@ Owns:
 Owns:
 - named subsystem-local operator construction
 - named product-state construction from subsystem ordering and dimensions
-- conversion of narrow drive specifications into a `QuantumToolbox`-compatible time-dependent Hamiltonian representation
+- conversion of narrow drive and flux-control specifications into a `QuantumToolbox`-compatible time-dependent Hamiltonian representation
 
 ### Simulation
 
@@ -115,18 +120,18 @@ end
 ```
 
 Supported operator symbols for Phase 3A:
-- `:a`
-- `:adag`
-- `:n`
-- `:x`
-- `:y`
+- effective-mode oscillator operators: `:a`, `:adag`, `:n`, `:x`, `:y`
+- circuit-mode transmon-like operators: `:charge`, `:cosphi`, `:sinphi`
+
+Operator validity depends on the active Hamiltonian specification. Circuit-mode
+examples should use the circuit-native symbols where appropriate.
 
 Examples:
 
 ```julia
 observables = [
     ObservableSpec(:nq, :q1, :n),
-    ObservableSpec(:xr, :r1, :x),
+    ObservableSpec(:phi_q, :q1, :cosphi),
 ]
 ```
 
@@ -169,19 +174,45 @@ Non-goals for Phase 3A:
 - pulse objects
 - waveform compilation
 
+### Flux Controls
+
+Keep time-dependent flux control separate from operator drives.
+
+```julia
+FluxControl(label::Symbol, target::Symbol, modulation; derivative)
+```
+
+Rules:
+- `target` must name a `TunableTransmon` or `TunableCoupler`
+- `modulation(params, t)` returns additive reduced flux `ΔΦ/Φ0`
+- `derivative(params, t)` is required for the nonadiabatic effective single-device workflow
+- circuit-mode flux-control examples must remain uncoupled
+- effective nonadiabatic flux-control examples must remain single-subsystem and uncoupled
+
+Example:
+
+```julia
+flux_control = FluxControl(
+    :q1_flux_pulse,
+    :q1,
+    (p, t) -> p.δ * sin(p.ωf * t);
+    derivative = (p, t) -> p.δ * p.ωf * cos(p.ωf * t),
+)
+```
+
 ### Evolution API
 
 Provide one main closed-system evolution entry point:
 
 ```julia
-evolve(system::CompositeSystem, ψ0, tlist; observables = nothing, drives = nothing, params = NamedTuple(), alg = nothing, progress_bar = Val(false), inplace = Val(true), kwargs...)
+evolve(system::CompositeSystem, ψ0, tlist; observables = nothing, drives = nothing, flux_controls = nothing, params = NamedTuple(), alg = nothing, progress_bar = Val(false), inplace = Val(true), kwargs...)
 evolve(model::StaticSystemModel, ψ0, tlist; kwargs...)
 ```
 
 Behavior:
 - `system` input builds the model first
 - `model` input reuses the existing static model directly
-- Hamiltonian assembly for `drives` stays in the Model layer
+- Hamiltonian assembly for `drives` and `flux_controls` stays in the Model layer
 - simulation delegates to `QuantumToolbox.sesolve`
 
 Important wrapper rule:
@@ -223,11 +254,25 @@ Recommended additions:
 - `number_operator(model, name::Symbol)`
 - `_quadrature_operator(model, name::Symbol, axis::Symbol)` for internal drive resolution
 - `basis_state(model; assignments...)`
-- `_time_dependent_hamiltonian(model, drives)` returning either a static operator or a `Tuple` compatible with `sesolve`
+- `_time_dependent_hamiltonian(model, drives, flux_controls)` returning either a static operator or a `Tuple` compatible with `sesolve`
 
 Design rule:
 - operator embedding stays a Model concern
 - Simulation should never rebuild local operators itself
+
+## Supported Circuit-Mode Workflows
+
+Phase 3A supports these circuit-mode workflows:
+- uncoupled `CircuitHamiltonianSpec(charge_cutoff = ...)`
+- spectrum and flux sweeps on transmon-like subsystems
+- circuit-native operators and observables through `charge`, `cosphi`, and `sinphi`
+- basis-state preparation and closed-system dynamics on supported uncoupled systems
+- tunable-device flux control in the supported uncoupled setting
+
+Deferred circuit-mode features remain out of scope:
+- capacitive couplings in circuit mode
+- coupled circuit-mode dynamics examples
+- circuit-mode reductions or Schrieffer-Wolff-style derived models
 
 ## Expected File Layout
 
@@ -274,29 +319,31 @@ Do not add in Phase 3A:
 ## Example User Flow
 
 ```julia
-q1 = TunableTransmon(:q1; EJmax = 20.0, EC = 0.25, flux = 0.0, asymmetry = 0.0, ncut = 6)
+q1 = TunableTransmon(:q1; EJmax = 20.0, EC = 0.25, flux = 0.10, asymmetry = 0.20, ng = 0.05, ncut = 6)
 sys = CompositeSystem(q1)
+circuit_spec = CircuitHamiltonianSpec(charge_cutoff = 3)
 
-ψ0 = basis_state(sys; q1 = 0)
+ψ0 = basis_state(sys; hamiltonian_spec = circuit_spec, q1 = 0)
 tlist = collect(range(0.0, 20.0; length = 201))
 
-drive = SubsystemDrive(
-    :q1_x_drive,
+flux_control = FluxControl(
+    :q1_flux_pulse,
     :q1,
-    :x,
-    (p, t) -> p.Ω * cos(p.ωd * t),
+    (p, t) -> p.δ * sin(p.ωf * t);
+    derivative = (p, t) -> p.δ * p.ωf * cos(p.ωf * t),
 )
 
 result = evolve(
     sys,
     ψ0,
     tlist;
-    drives = [drive],
-    observables = [ObservableSpec(:nq, :q1, :n)],
-    params = (; Ω = 0.02, ωd = 5.0),
+    hamiltonian_spec = circuit_spec,
+    flux_controls = [flux_control],
+    observables = [ObservableSpec(:charge_q, :q1, :charge)],
+    params = (; δ = 0.06, ωf = 5.5),
 )
 
-trace = observable_trace(result, :nq)
+trace = observable_trace(result, :charge_q)
 ```
 
 ## Test Plan
@@ -321,7 +368,17 @@ Mandatory regression coverage:
 - verify observable traces have the same length as `tlist`
 - verify the wrapper path with `drives` reaches `sesolve` successfully
 
-5. Result shape
+5. Circuit-mode closed-system example
+- run an uncoupled circuit-mode example with `CircuitHamiltonianSpec(charge_cutoff = ...)`
+- verify circuit-native observables such as `:charge` or `:cosphi` can be traced
+- verify the documented notebook flow stays within supported uncoupled circuit-mode limits
+
+6. Flux-control example
+- run an uncoupled tunable-device example with `FluxControl`
+- verify the circuit-mode flux-control path reaches `sesolve`
+- verify the single-device nonadiabatic effective flux path is documented with its explicit limits
+
+7. Result shape
 - verify `DynamicsResult.times`, `states`, and `observables` stay aligned
 - verify `solver_result` is preserved for debugging
 
@@ -329,7 +386,8 @@ Mandatory regression coverage:
 
 Phase 3A should ship with:
 - one README section or short note pointing to dynamics support
-- one notebook walkthrough for closed-system dynamics
+- one general notebook walkthrough for closed-system dynamics
+- one dedicated notebook walkthrough for supported circuit-Hamiltonian dynamics
 - one regression test mirroring the documented example
 
 ## Risks

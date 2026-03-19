@@ -19,3 +19,19 @@ struct CapacitiveCoupling <: AbstractCoupling
 end
 
 coupling_endpoints(coupling::CapacitiveCoupling) = (coupling.source, coupling.target)
+
+struct CircuitCapacitiveCoupling <: AbstractCoupling
+    source::Symbol
+    target::Symbol
+    G::Float64
+
+    function CircuitCapacitiveCoupling(source::Symbol, target::Symbol; G::Real)
+        validate_identifier(source, "coupling source")
+        validate_identifier(target, "coupling target")
+        source != target || throw(ArgumentError("Coupling endpoints must be distinct subsystem names."))
+
+        new(source, target, validate_positive(G, "G"))
+    end
+end
+
+coupling_endpoints(coupling::CircuitCapacitiveCoupling) = (coupling.source, coupling.target)
