@@ -36,10 +36,11 @@ The examples below use a shared frequency unit such as `GHz`.
 - `output/jupyter-notebook/phase3a-closed-system-dynamics-walkthrough.ipynb`: Phase 3A closed-system dynamics walkthrough with `basis_state`, `ObservableSpec`, `SubsystemDrive`, and `evolve`.
 - `output/jupyter-notebook/phase3a-drive-dynamics-recipes.ipynb`: focused drive-dynamics recipes for comparing undriven and driven closed-system evolution.
 - `output/jupyter-notebook/phase3a-detuning-and-coupled-response.ipynb`: single-mode drive detuning notebook with a short coupled-response extension.
+- `output/jupyter-notebook/phase3a-fixed-qubit-coupler-resonator-dynamics.ipynb`: mixed `Transmon - TunableCoupler - Resonator` dynamics walkthrough with static flux selection and transferred resonator response.
 - `output/jupyter-notebook/phase3a-tunable-coupler-two-qubit-dynamics.ipynb`: mixed `TunableTransmon - TunableCoupler - Transmon` dynamics and population-transfer walkthrough.
 
 The Phase 3A dynamics notebooks use `UnicodePlots.jl` for lightweight inline plots inside the notebooks.
-Use `phase3a-detuning-and-coupled-response.ipynb` for drive-detuning intuition and `phase3a-tunable-coupler-two-qubit-dynamics.ipynb` for mixed-system transfer.
+Use `phase3a-detuning-and-coupled-response.ipynb` for drive-detuning intuition, `phase3a-fixed-qubit-coupler-resonator-dynamics.ipynb` for fixed-qubit transfer into a resonator, and `phase3a-tunable-coupler-two-qubit-dynamics.ipynb` for mixed two-qubit transfer.
 
 ### 1. Static transmon spectrum
 
