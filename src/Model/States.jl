@@ -22,4 +22,10 @@ function basis_state(model::StaticSystemModel; assignments...)
     return length(local_states) == 1 ? only(local_states) : kron(local_states...)
 end
 
-basis_state(system::CompositeSystem; assignments...) = basis_state(build_model(system); assignments...)
+function basis_state(
+    system::CompositeSystem;
+    hamiltonian_spec::AbstractHamiltonianSpec = EffectiveHamiltonianSpec(),
+    assignments...,
+)
+    return basis_state(build_model(system; hamiltonian_spec = hamiltonian_spec); assignments...)
+end

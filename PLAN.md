@@ -27,6 +27,10 @@ Primary interaction family:
 The focus is architecture-level modeling, not building a general-purpose solver
 library from scratch.
 
+The current model surface includes two explicit Hamiltonian representations:
+- `EffectiveHamiltonianSpec()` for the default Duffing-style effective model
+- `CircuitHamiltonianSpec(charge_cutoff = ...)` for the current uncoupled charge-basis circuit model
+
 ## Document Roles
 
 - `PLAN.md`: project scope, phase boundaries, milestone criteria
@@ -37,11 +41,20 @@ library from scratch.
 
 ## Project Status
 
-Status as of 2026-03-13:
+Status as of 2026-03-19:
 - Phase 1: complete
 - Phase 2: complete
 - Phase 2.5: complete
 - Phase 3A: in progress
+- Hamiltonian representation expansion: implemented, verification in progress
+
+## Current Verification Priorities
+
+- verify that the default effective-mode workflows remain regression-stable
+- verify fixed and tunable circuit-mode spectra against reference expectations
+- verify circuit-mode sensitivity to `ng`, flux, and charge-cutoff convergence
+- verify circuit-mode closed-system dynamics and circuit-native operators on supported uncoupled systems
+- document and enforce current circuit-mode limits such as unsupported capacitive couplings and absent Schrieffer-Wolff reductions
 
 ## Phase Plan
 
@@ -95,7 +108,7 @@ In scope:
 - tuning-curve and summary-style helpers for fixed, tunable, and mixed systems
 - short user-facing docs for static, tunable, and mixed-system workflows
 - validation and error-message cleanup
-- explicit documentation of deferred model fidelity features such as `ng` support
+- explicit documentation of Hamiltonian-spec behavior, approximation limits, and cutoff semantics
 
 Out of scope:
 - new solver capabilities
@@ -115,6 +128,7 @@ In scope:
 - named initial-state helpers for composite systems
 - named observable helpers and expectation-value traces
 - narrowly scoped driven closed-system evolution built on model-layer Hamiltonian assembly
+- support for supported effective and circuit Hamiltonian specs through the same simulation entry points
 
 Out of scope:
 - Lindblad dynamics
@@ -160,7 +174,11 @@ Goal:
 - improve model fidelity and widen subsystem coverage without breaking the composition API
 
 In scope:
+- stable Hamiltonian-spec APIs that separate effective Hilbert dimension from circuit charge cutoff
+- uncoupled circuit-Hamiltonian support for transmon-like subsystems and circuit-native operators
+- verification of circuit-mode behavior through regression, convergence, and reference-style checks
 - higher-fidelity transmon modeling beyond the initial Duffing approximation
+- Schrieffer-Wolff-derived effective models when the underlying circuit path is ready
 - additional interaction families where physically justified
 - performance work for larger Hilbert spaces
 - future subsystem families such as `Fluxonium`
@@ -168,6 +186,7 @@ In scope:
 Out of scope:
 - replacing the layer architecture
 - introducing solver-specific parallel object models
+- automatic circuit quantization from schematic descriptions
 
 ## Milestone Criteria
 
@@ -187,13 +206,13 @@ Phase 2.5 is complete when:
 - the public static and tunable APIs are stable enough to document without caveats
 - `SpectrumResult` and `SweepResult` support standard summary-style analysis helpers
 - the package has short docs for fixed, tunable, and mixed-system examples
-- deferred or unsupported physics features are documented explicitly
+- Hamiltonian-spec semantics and unsupported physics features are documented explicitly
 
 Phase 3A is complete when:
 - closed-system evolution runs through stable public APIs
 - at least one documented dynamics example exists for a static or tunable system
 - time-domain results follow the same typed-result conventions as spectrum and sweep workflows
-- named initial-state and observable helpers cover the documented workflows
+- named initial-state and observable helpers cover the documented workflows for supported model representations
 
 Phase 3B is complete when:
 - closed- and open-system evolution run through stable public APIs
@@ -206,6 +225,8 @@ Phase 4 is complete when:
 - advanced analysis remains layered on typed results without rebuilding Hamiltonians
 
 Phase 5 is complete when:
+- effective and circuit Hamiltonian specifications fit the existing `CompositeSystem -> Model -> Simulation -> Analysis` flow
+- circuit-mode transmon-like behavior is verified through regression tests and cutoff/reference checks
 - higher-fidelity subsystem models fit the existing `CompositeSystem -> Model -> Simulation -> Analysis` flow
-- at least one new subsystem or interaction family extends the existing architecture cleanly
+- at least one next-step fidelity extension such as circuit-mode couplings, Schrieffer-Wolff reduction, or a new subsystem family extends the existing architecture cleanly
 - fidelity improvements preserve backward-compatible user workflows where feasible

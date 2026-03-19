@@ -40,6 +40,7 @@ struct TunableTransmon <: AbstractSubsystem
     EC::Float64
     flux::Float64
     asymmetry::Float64
+    ng::Float64
     ncut::Int
 
     function TunableTransmon(
@@ -48,6 +49,7 @@ struct TunableTransmon <: AbstractSubsystem
         EC::Real,
         flux::Real = 0.0,
         asymmetry::Real = 0.0,
+        ng::Real = 0.0,
         ncut::Integer = 15,
     )
         new(
@@ -56,6 +58,7 @@ struct TunableTransmon <: AbstractSubsystem
             validate_positive(EC, "EC"),
             validate_finite(flux, "flux"),
             validate_abs_leq_one(asymmetry, "asymmetry"),
+            validate_finite(ng, "ng"),
             validate_positive_integer(ncut, "ncut"),
         )
     end
@@ -67,6 +70,7 @@ struct TunableCoupler <: AbstractSubsystem
     EC::Float64
     flux::Float64
     asymmetry::Float64
+    ng::Float64
     ncut::Int
 
     function TunableCoupler(
@@ -75,6 +79,7 @@ struct TunableCoupler <: AbstractSubsystem
         EC::Real,
         flux::Real = 0.0,
         asymmetry::Real = 0.0,
+        ng::Real = 0.0,
         ncut::Integer = 11,
     )
         new(
@@ -83,6 +88,7 @@ struct TunableCoupler <: AbstractSubsystem
             validate_positive(EC, "EC"),
             validate_finite(flux, "flux"),
             validate_abs_leq_one(asymmetry, "asymmetry"),
+            validate_finite(ng, "ng"),
             validate_positive_integer(ncut, "ncut"),
         )
     end

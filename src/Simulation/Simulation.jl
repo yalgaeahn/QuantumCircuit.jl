@@ -3,6 +3,8 @@ module Simulation
 using QuantumToolbox: eigenenergies, sesolve
 using ..Architecture: CompositeSystem, with_coupling_parameter, with_subsystem_parameter
 using ..Model:
+    AbstractHamiltonianSpec,
+    EffectiveHamiltonianSpec,
     ObservableSpec,
     StaticSystemModel,
     SubsystemDrive,
@@ -94,12 +96,26 @@ function spectrum(model::StaticSystemModel; levels::Integer = 6)
     return SpectrumResult(model, energies[1:levels])
 end
 
-function spectrum(system::CompositeSystem; levels::Integer = 6)
-    return spectrum(build_model(system); levels = levels)
+function spectrum(
+    system::CompositeSystem;
+    levels::Integer = 6,
+    hamiltonian_spec::AbstractHamiltonianSpec = EffectiveHamiltonianSpec(),
+)
+    return spectrum(build_model(system; hamiltonian_spec = hamiltonian_spec); levels = levels)
 end
 
-function simulate_sweep(system::CompositeSystem, spec::SweepSpec)
-    spectra = [spectrum(_apply_sweep(system, spec.target, spec.parameter, value); levels = spec.levels) for value in spec.values]
+function simulate_sweep(
+    system::CompositeSystem,
+    spec::SweepSpec;
+    hamiltonian_spec::AbstractHamiltonianSpec = EffectiveHamiltonianSpec(),
+)
+    spectra = [
+        spectrum(
+            _apply_sweep(system, spec.target, spec.parameter, value);
+            levels = spec.levels,
+            hamiltonian_spec = hamiltonian_spec,
+        ) for value in spec.values
+    ]
     return SweepResult(system, spec, copy(spec.values), spectra)
 end
 
@@ -115,6 +131,7 @@ function evolve(
     system::CompositeSystem,
     ψ0,
     tlist::AbstractVector;
+    hamiltonian_spec::AbstractHamiltonianSpec = EffectiveHamiltonianSpec(),
     observables = nothing,
     drives = nothing,
     params = NamedTuple(),
@@ -124,7 +141,7 @@ function evolve(
     kwargs...,
 )
     return evolve(
-        build_model(system),
+        build_model(system; hamiltonian_spec = hamiltonian_spec),
         ψ0,
         tlist;
         observables = observables,

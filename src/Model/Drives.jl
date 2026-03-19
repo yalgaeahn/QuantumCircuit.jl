@@ -7,7 +7,7 @@ struct SubsystemDrive{F}
     function SubsystemDrive(label::Symbol, target::Symbol, operator::Symbol, coefficient::F) where {F}
         _validate_nonempty_symbol(label, "drive label")
         _validate_nonempty_symbol(target, "drive target")
-        _validate_operator_symbol(operator, "drive operator")
+        _validate_nonempty_symbol(operator, "drive operator")
         coefficient isa Function || throw(ArgumentError("drive coefficient must be callable."))
         return new{F}(label, target, operator, coefficient)
     end

@@ -6,6 +6,7 @@ built on top of `QuantumToolbox.jl`.
 Current scope:
 - fixed and flux-tunable subsystem declarations
 - composite-system Hamiltonian construction
+- explicit effective and circuit Hamiltonian specifications
 - low-lying eigenspectra
 - parameter sweeps
 - result-driven spectrum and sweep analysis
@@ -188,7 +189,10 @@ p1 = population_trace(result, :r1, 1)
 
 ## Modeling Notes
 
-- The current transmon and tunable-device implementation uses a Duffing-style approximation.
+- The default transmon and tunable-device path uses a Duffing-style effective Hamiltonian through `EffectiveHamiltonianSpec()`.
+- `CircuitHamiltonianSpec(charge_cutoff = N)` builds an uncoupled charge-basis Hamiltonian for transmon-like subsystems with Hilbert dimension `2N + 1`.
 - `EJ`, `EC`, resonator `ω`, and coupling `g` should share the same frequency unit.
 - `flux` is interpreted as reduced flux `Phi/Phi0`.
-- `Transmon.ng` is part of the public subsystem declaration but is not yet used in the current Hamiltonian model.
+- subsystem `ncut` remains the effective-model Hilbert dimension; circuit-mode charge cutoff is configured separately on `CircuitHamiltonianSpec`.
+- `ng` is used in circuit mode for `Transmon`, `TunableTransmon`, and `TunableCoupler`.
+- circuit-mode capacitive couplings are not implemented yet; use `EffectiveHamiltonianSpec()` for coupled systems.

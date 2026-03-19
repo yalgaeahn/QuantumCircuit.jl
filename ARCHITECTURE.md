@@ -104,8 +104,9 @@ Public examples:
 Contract:
 - `hamiltonian(...)` returns a QuantumToolbox-compatible Hamiltonian object
 - the returned object is the canonical handoff from Model to Simulation
-- the initial Phase-1 transmon model uses a Duffing approximation derived from `EJ` and `EC`
-- the initial Phase-2 tunable path uses a SQUID effective `EJ` inside the same Duffing-style approximation
+- the default effective transmon model uses a Duffing approximation derived from `EJ` and `EC`
+- circuit-mode transmon-like models use an explicit charge-basis Hamiltonian with a separate charge cutoff
+- circuit-mode capacitive couplings are intentionally unsupported until a dedicated circuit-coupling model exists
 
 Must not own:
 - eigensolver execution

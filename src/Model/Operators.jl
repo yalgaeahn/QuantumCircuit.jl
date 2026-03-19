@@ -1,5 +1,3 @@
-const _SUPPORTED_LOCAL_OPERATOR_SYMBOLS = (:a, :adag, :n, :x, :y)
-
 struct ObservableSpec
     label::Symbol
     target::Symbol
@@ -8,52 +6,111 @@ struct ObservableSpec
     function ObservableSpec(label::Symbol, target::Symbol, operator::Symbol)
         _validate_nonempty_symbol(label, "observable label")
         _validate_nonempty_symbol(target, "observable target")
-        _validate_operator_symbol(operator, "observable operator")
+        _validate_nonempty_symbol(operator, "observable operator")
         return new(label, target, operator)
     end
 end
 
-function _validate_nonempty_symbol(value::Symbol, label::AbstractString)
-    value == Symbol("") && throw(ArgumentError("$label must not be empty."))
-    return value
-end
-
-function _validate_operator_symbol(operator::Symbol, label::AbstractString)
-    operator in _SUPPORTED_LOCAL_OPERATOR_SYMBOLS ||
-        throw(ArgumentError("$label must be one of $(_SUPPORTED_LOCAL_OPERATOR_SYMBOLS), got $operator."))
-    return operator
-end
-
 function annihilation_operator(model::StaticSystemModel, target::Symbol)
-    return model.annihilation_operators[_subsystem_name(model, target)]
+    return _lookup_operator(model, target, :a)
 end
 
-annihilation_operator(system::CompositeSystem, target::Symbol) = annihilation_operator(build_model(system), target)
+function annihilation_operator(
+    system::CompositeSystem,
+    target::Symbol;
+    hamiltonian_spec::AbstractHamiltonianSpec = EffectiveHamiltonianSpec(),
+)
+    return annihilation_operator(build_model(system; hamiltonian_spec = hamiltonian_spec), target)
+end
 
-creation_operator(model::StaticSystemModel, target::Symbol) = dag(annihilation_operator(model, target))
-creation_operator(system::CompositeSystem, target::Symbol) = creation_operator(build_model(system), target)
+creation_operator(model::StaticSystemModel, target::Symbol) = _lookup_operator(model, target, :adag)
 
-number_operator(model::StaticSystemModel, target::Symbol) = creation_operator(model, target) * annihilation_operator(model, target)
-number_operator(system::CompositeSystem, target::Symbol) = number_operator(build_model(system), target)
+function creation_operator(
+    system::CompositeSystem,
+    target::Symbol;
+    hamiltonian_spec::AbstractHamiltonianSpec = EffectiveHamiltonianSpec(),
+)
+    return creation_operator(build_model(system; hamiltonian_spec = hamiltonian_spec), target)
+end
+
+number_operator(model::StaticSystemModel, target::Symbol) = _lookup_operator(model, target, :n)
+
+function number_operator(
+    system::CompositeSystem,
+    target::Symbol;
+    hamiltonian_spec::AbstractHamiltonianSpec = EffectiveHamiltonianSpec(),
+)
+    return number_operator(build_model(system; hamiltonian_spec = hamiltonian_spec), target)
+end
 
 function quadrature_operator(model::StaticSystemModel, target::Symbol, axis::Symbol)
-    a = annihilation_operator(model, target)
-    adag = dag(a)
-    axis == :x && return a + adag
-    axis == :y && return -1im * (a - adag)
-    throw(ArgumentError("quadrature axis must be :x or :y, got $axis."))
+    (axis == :x || axis == :y) || throw(ArgumentError("quadrature axis must be :x or :y, got $axis."))
+    return _lookup_operator(model, target, axis)
 end
 
-quadrature_operator(system::CompositeSystem, target::Symbol, axis::Symbol) =
-    quadrature_operator(build_model(system), target, axis)
+function quadrature_operator(
+    system::CompositeSystem,
+    target::Symbol,
+    axis::Symbol;
+    hamiltonian_spec::AbstractHamiltonianSpec = EffectiveHamiltonianSpec(),
+)
+    return quadrature_operator(build_model(system; hamiltonian_spec = hamiltonian_spec), target, axis)
+end
+
+charge_operator(model::StaticSystemModel, target::Symbol) = _lookup_operator(model, target, :charge)
+
+function charge_operator(
+    system::CompositeSystem,
+    target::Symbol;
+    hamiltonian_spec::AbstractHamiltonianSpec = EffectiveHamiltonianSpec(),
+)
+    return charge_operator(build_model(system; hamiltonian_spec = hamiltonian_spec), target)
+end
+
+cosphi_operator(model::StaticSystemModel, target::Symbol) = _lookup_operator(model, target, :cosphi)
+
+function cosphi_operator(
+    system::CompositeSystem,
+    target::Symbol;
+    hamiltonian_spec::AbstractHamiltonianSpec = EffectiveHamiltonianSpec(),
+)
+    return cosphi_operator(build_model(system; hamiltonian_spec = hamiltonian_spec), target)
+end
+
+sinphi_operator(model::StaticSystemModel, target::Symbol) = _lookup_operator(model, target, :sinphi)
+
+function sinphi_operator(
+    system::CompositeSystem,
+    target::Symbol;
+    hamiltonian_spec::AbstractHamiltonianSpec = EffectiveHamiltonianSpec(),
+)
+    return sinphi_operator(build_model(system; hamiltonian_spec = hamiltonian_spec), target)
+end
 
 function _embedded_operator(model::StaticSystemModel, target::Symbol, operator::Symbol)
-    operator == :a && return annihilation_operator(model, target)
-    operator == :adag && return creation_operator(model, target)
-    operator == :n && return number_operator(model, target)
-    (operator == :x || operator == :y) && return quadrature_operator(model, target, operator)
-    _validate_operator_symbol(operator, "operator")
-    error("Unreachable operator symbol branch: $operator")
+    return _lookup_operator(model, target, operator)
+end
+
+function _lookup_operator(model::StaticSystemModel, target::Symbol, operator::Symbol)
+    subsystem_name = _subsystem_name(model, target)
+    cache_key = (subsystem_name, operator)
+
+    if haskey(model.operator_cache, cache_key)
+        return model.operator_cache[cache_key]
+    end
+
+    supported_operators = _supported_operator_symbols(model, subsystem_name)
+    throw(
+        ArgumentError(
+            "Operator $operator is not supported for subsystem $subsystem_name under $(nameof(typeof(model.hamiltonian_spec))). Supported operators: $(supported_operators).",
+        ),
+    )
+end
+
+function _supported_operator_symbols(model::StaticSystemModel, target::Symbol)
+    symbols = Symbol[key[2] for key in keys(model.operator_cache) if key[1] == target]
+    sort!(symbols; by = string)
+    return Tuple(symbols)
 end
 
 function _projector_operator(model::StaticSystemModel, target::Symbol, level::Int)

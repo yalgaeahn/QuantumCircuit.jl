@@ -2,7 +2,7 @@
 
 julia_version = "1.12.5"
 manifest_format = "2.0"
-project_hash = "f7d49f83d4990a8df9ba19451eb81d467ef45fdc"
+project_hash = "274949efef7d54dcb59acb89055d080791d10f70"
 
 [[deps.ADTypes]]
 git-tree-sha1 = "f7304359109c768cf32dc5fa2d371565bb63b68a"
@@ -1177,7 +1177,7 @@ version = "2.11.2"
     Enzyme = "7da242da-08ed-463a-9acd-ee780be4f1d9"
 
 [[deps.QuantumCircuit]]
-deps = ["QuantumToolbox"]
+deps = ["QuantumToolbox", "SparseArrays", "UnicodePlots"]
 path = "."
 uuid = "96d21937-3011-4cfc-b550-60fb997273a5"
 version = "0.1.0"
