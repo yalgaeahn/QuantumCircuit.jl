@@ -5,6 +5,7 @@ using QuantumToolbox: expect, eye
 effective_EJ(EJmax, flux, asymmetry) = EJmax * sqrt(cospi(flux)^2 + asymmetry^2 * sinpi(flux)^2)
 transition_01(system::CompositeSystem; kwargs...) = transition_frequencies(spectrum(system; levels = 4, kwargs...))[1]
 is_strictly_decreasing(values) = all(diff(values) .< 0)
+wrapped_phase_distance(phase, target) = abs(mod(phase - target + π, 2π) - π)
 
 function exact_tunable_circuit_hamiltonian(model, target, subsystem)
     charge = charge_operator(model, target)
@@ -968,4 +969,206 @@ end
     @test maximum(q2_population.values) > 1e-3
     @test maximum(real.(tq1_number.values)) > 1e-2
     @test maximum(real.(q2_number.values)) > 1e-3
+end
+
+@testset "Projected unitary and subspace analysis" begin
+    identity4 = ComplexF64[
+        1 0 0 0
+        0 1 0 0
+        0 0 1 0
+        0 0 0 1
+    ]
+
+    phase_sys = CompositeSystem(
+        Resonator(:r1; ω = 1.0, dim = 2),
+        Resonator(:r2; ω = 1.5, dim = 2),
+    )
+    phase_spec = subspace_spec(phase_sys; subsystem_levels = (r1 = [0, 1], r2 = [0, 1]))
+    phase_trace = projected_unitary(phase_sys, phase_spec, [0.0, 1.0])
+    local_phase = ComplexF64[
+        exp(0.4im) 0 0 0
+        0 exp(0.1im) 0 0
+        0 0 exp(-0.2im) 0
+        0 0 0 exp(-0.5im)
+    ]
+
+    @test phase_spec.labels == ["|00>", "|01>", "|10>", "|11>"]
+    @test phase_trace.unitaries[1] ≈ identity4 atol = 1e-12
+    @test maximum(phase_trace.leakages) ≈ 0.0 atol = 1e-12
+    @test conditional_phase(phase_trace.unitaries[end]) ≈ 0.0 atol = 1e-6
+    @test strip_local_z_phases(phase_trace.unitaries[end]) ≈ identity4 atol = 1e-6
+    @test conditional_phase(phase_trace.unitaries[end] * local_phase) ≈ conditional_phase(phase_trace.unitaries[end]) atol = 1e-6
+
+    dressed_sys = CompositeSystem(
+        Resonator(:a; ω = 1.0, dim = 2),
+        Resonator(:b; ω = 1.2, dim = 2),
+        CapacitiveCoupling(:a, :b; g = 0.02),
+    )
+    dressed_spec = subspace_spec(dressed_sys; subsystem_levels = (a = [0, 1], b = [0, 1]), basis = :dressed_static)
+    dressed_trace = projected_unitary(dressed_sys, dressed_spec, [0.0, 1.0])
+
+    @test minimum(dressed_spec.reference_overlaps) > 0.98
+    @test dressed_trace.unitaries[1] ≈ identity4 atol = 1e-12
+
+    leakage_sys = CompositeSystem(Resonator(:r1; ω = 1.0, dim = 3))
+    leakage_spec = subspace_spec(leakage_sys; subsystem_levels = (r1 = [0, 1],))
+    leakage_drive = SubsystemDrive(
+        :r1_x_drive,
+        :r1,
+        :x,
+        (p, t) -> p.Ω * cos(p.ωd * t),
+    )
+    leakage_trace = projected_unitary(
+        leakage_sys,
+        leakage_spec,
+        collect(range(0.0, 4.0; length = 41));
+        drives = [leakage_drive],
+        params = (; Ω = 0.35, ωd = 1.0),
+    )
+    leakage_move = best_move(leakage_trace; source_index = 1, target_index = 2)
+
+    @test maximum(leakage_trace.leakages) > 1e-2
+    @test leakage_move.transfer_probability > 0.3
+    @test leakage_move.leakage > 1e-2
+end
+
+@testset "Spectrum comparison helpers" begin
+    snapshot = load_renger2026_snapshot()
+    pair = renger2026_model_pair(snapshot)
+    comparison = compare_model_spectra(
+        pair.circuit.system,
+        pair.effective.system;
+        reference_hamiltonian_spec = pair.circuit.hamiltonian_spec,
+        candidate_hamiltonian_spec = pair.effective.hamiltonian_spec,
+        levels = 6,
+    )
+
+    @test length(comparison.level_deltas) == 6
+    @test length(comparison.transition_deltas) == 5
+    @test all(isfinite, comparison.level_deltas)
+    @test all(isfinite, comparison.transition_deltas)
+
+    q = TunableTransmon(:q; EJmax = 2.0, EC = 0.2, flux = 0.0, asymmetry = 0.1, ncut = 4)
+    r = Resonator(:r; ω = 1.2, dim = 2)
+    values = collect(range(0.0, 0.5; length = 41))
+    effective_sweep = simulate_sweep(
+        CompositeSystem(q, r, CapacitiveCoupling(:q, :r; g = 0.03)),
+        SweepSpec(:q, :flux, values; levels = 4),
+    )
+    circuit_sweep = simulate_sweep(
+        CompositeSystem(q, r, CircuitCapacitiveCoupling(:q, :r; G = 0.03)),
+        SweepSpec(:q, :flux, values; levels = 4);
+        hamiltonian_spec = CircuitHamiltonianSpec(charge_cutoff = 2),
+    )
+    gap_comparison = compare_minimum_gap(circuit_sweep, effective_sweep)
+
+    @test gap_comparison.reference.sweep_value == values[end]
+    @test gap_comparison.candidate.sweep_value == values[end]
+    @test gap_comparison.sweep_value_delta == 0.0
+    @test isfinite(gap_comparison.gap_delta)
+end
+
+@testset "Renger 2026 workflow builders" begin
+    snapshot = load_renger2026_snapshot()
+    qr_stage = renger2026_stage1_qr_system(snapshot)
+    qcr_stage = renger2026_stage1_qcr_system(snapshot)
+    pair = renger2026_model_pair(snapshot)
+
+    @test length(subsystems(qr_stage.system)) == 2
+    @test length(couplings(qr_stage.system)) == 1
+    @test length(subsystems(qcr_stage.system)) == 3
+    @test length(couplings(qcr_stage.system)) == 2
+    @test pair.effective.hamiltonian_spec isa EffectiveHamiltonianSpec
+    @test pair.circuit.hamiltonian_spec isa CircuitHamiltonianSpec
+
+    effective_model = build_model(pair.effective.system)
+    circuit_model = build_model(pair.circuit.system; hamiltonian_spec = pair.circuit.hamiltonian_spec)
+
+    @test size(hamiltonian(effective_model).data) == (1200, 1200)
+    @test size(hamiltonian(circuit_model).data) == (1875, 1875)
+end
+
+@testset "MOVE workflow helpers" begin
+    qr_sys = CompositeSystem(
+        Transmon(:q; EJ = 0.9, EC = 0.2, ncut = 3),
+        Resonator(:r; ω = 1.0, dim = 2),
+        CapacitiveCoupling(:q, :r; g = 0.08),
+    )
+    qr_spec = subspace_spec(qr_sys; subsystem_levels = (q = [0, 1], r = [0, 1]))
+    qr_trace = projected_unitary(qr_sys, qr_spec, collect(range(0.0, 40.0; length = 401)))
+    qr_move = best_move(qr_trace; source_index = 3, target_index = 2)
+
+    @test qr_move.transfer_probability > 0.99
+    @test qr_move.leakage < 1e-6
+
+    qcr_sys = CompositeSystem(
+        Transmon(:q; EJ = 0.9, EC = 0.2, ncut = 3),
+        TunableCoupler(:c; EJmax = 2.2, EC = 0.15, flux = 0.0, asymmetry = 0.1, ncut = 3),
+        Resonator(:r; ω = 1.0, dim = 2),
+        CapacitiveCoupling(:q, :c; g = 0.07),
+        CapacitiveCoupling(:c, :r; g = 0.07),
+    )
+    qcr_tlist = collect(range(0.0, 80.0; length = 401))
+    qcr_result = evolve(qcr_sys, basis_state(qcr_sys; q = 1, c = 0, r = 0), qcr_tlist)
+    qcr_trace = projected_unitary(qcr_sys, subspace_spec(qcr_sys; subsystem_levels = (q = [0, 1], r = [0, 1])), qcr_tlist)
+    qcr_move = best_move(qcr_trace; source_index = 3, target_index = 2)
+
+    @test maximum(population_trace(qcr_result, :c, 1).values) > 0.05
+    @test maximum(population_trace(qcr_result, :r, 1).values) > 0.45
+    @test qcr_move.transfer_probability > 0.45
+    @test qcr_move.leakage < 0.1
+
+    snapshot = load_renger2026_snapshot()
+    full_pair = renger2026_model_pair(snapshot)
+    full_sys = full_pair.effective.system
+    full_tlist = collect(range(0.0, 5.0; length = 51))
+    full_result = evolve(
+        full_sys,
+        basis_state(full_sys; QB1 = 1, TC1 = 0, CR = 0, TC2 = 0, QB2 = 0),
+        full_tlist;
+        observables = [ObservableSpec(:ncr, :CR, :n)],
+    )
+    detuned_sys = with_subsystem_parameter(full_sys, :CR, :ω, 6.0)
+    detuned_result = evolve(
+        detuned_sys,
+        basis_state(detuned_sys; QB1 = 1, TC1 = 0, CR = 0, TC2 = 0, QB2 = 0),
+        full_tlist;
+        observables = [ObservableSpec(:ncr, :CR, :n)],
+    )
+
+    @test maximum(real.(observable_trace(full_result, :ncr).values)) > maximum(real.(observable_trace(detuned_result, :ncr).values))
+    @test maximum(population_trace(full_result, :QB2, 1).values) > maximum(population_trace(detuned_result, :QB2, 1).values)
+end
+
+@testset "CZ workflow helpers" begin
+    q1 = Transmon(:q1; EJ = 0.9, EC = 0.2, ng = 0.0, ncut = 3)
+    q2 = Transmon(:q2; EJ = 0.95, EC = 0.2, ng = 0.0, ncut = 3)
+    c = TunableCoupler(:c; EJmax = 2.6, EC = 0.12, flux = 0.0, asymmetry = 0.1, ng = 0.0, ncut = 3)
+    cz_sys = CompositeSystem(
+        q1,
+        c,
+        q2,
+        CircuitCapacitiveCoupling(:q1, :c; G = 0.03),
+        CircuitCapacitiveCoupling(:c, :q2; G = 0.03),
+    )
+    circuit_spec = CircuitHamiltonianSpec(charge_cutoff = 2)
+    cz_subspace = subspace_spec(
+        cz_sys;
+        hamiltonian_spec = circuit_spec,
+        subsystem_levels = (q1 = [0, 1], q2 = [0, 1]),
+        basis = :dressed_static,
+    )
+    flux = FluxControl(:cz_flux, :c, (p, t) -> p.δ)
+    cz_trace = projected_unitary(
+        cz_sys,
+        cz_subspace,
+        collect(range(0.0, 100.0; length = 201));
+        hamiltonian_spec = circuit_spec,
+        flux_controls = [flux],
+        params = (; δ = 0.04),
+    )
+    cz_point = best_cz(cz_trace)
+
+    @test wrapped_phase_distance(cz_point.conditional_phase, π) < 0.01
+    @test cz_point.leakage < 0.01
 end
