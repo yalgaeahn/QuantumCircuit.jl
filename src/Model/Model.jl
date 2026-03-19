@@ -21,6 +21,8 @@ export AbstractEffectiveMethod,
     CircuitHamiltonianSpec,
     DuffingEffectiveMethod,
     EffectiveHamiltonianSpec,
+    FluxControl,
+    NonadiabaticDuffingEffectiveMethod,
     ObservableSpec,
     StaticSystemModel,
     SubsystemDrive,
@@ -39,6 +41,7 @@ abstract type AbstractHamiltonianSpec end
 abstract type AbstractEffectiveMethod end
 
 struct DuffingEffectiveMethod <: AbstractEffectiveMethod end
+struct NonadiabaticDuffingEffectiveMethod <: AbstractEffectiveMethod end
 
 struct EffectiveHamiltonianSpec{M<:AbstractEffectiveMethod} <: AbstractHamiltonianSpec
     method::M
@@ -66,6 +69,8 @@ struct CircuitHamiltonianSpec <: AbstractHamiltonianSpec
 end
 
 const _CircuitChargeSubsystem = Union{Transmon, TunableTransmon, TunableCoupler}
+const _DuffingLikeEffectiveMethod = Union{DuffingEffectiveMethod, NonadiabaticDuffingEffectiveMethod}
+const _TunableSubsystem = Union{TunableTransmon, TunableCoupler}
 const _OperatorCache = Dict{Tuple{Symbol, Symbol}, Any}
 const _LocalOperatorCache = Dict{Symbol, Any}
 
@@ -214,6 +219,8 @@ function _oscillator_operator_bundle(dimension::Int)
     return _LocalOperatorCache(
         :a => annihilator,
         :adag => creator,
+        :aa => annihilator * annihilator,
+        :adagadag => creator * creator,
         :n => number_operator,
         :x => annihilator + creator,
         :y => -1im * (annihilator - creator),
@@ -246,7 +253,7 @@ end
 
 function _local_hamiltonian(
     subsystem::Transmon,
-    hamiltonian_spec::EffectiveHamiltonianSpec{DuffingEffectiveMethod},
+    hamiltonian_spec::EffectiveHamiltonianSpec{<:_DuffingLikeEffectiveMethod},
     dimension::Int,
     local_operators::_LocalOperatorCache,
 )
@@ -255,7 +262,7 @@ end
 
 function _local_hamiltonian(
     subsystem::TunableTransmon,
-    hamiltonian_spec::EffectiveHamiltonianSpec{DuffingEffectiveMethod},
+    hamiltonian_spec::EffectiveHamiltonianSpec{<:_DuffingLikeEffectiveMethod},
     dimension::Int,
     local_operators::_LocalOperatorCache,
 )
@@ -271,7 +278,7 @@ end
 
 function _local_hamiltonian(
     subsystem::TunableCoupler,
-    hamiltonian_spec::EffectiveHamiltonianSpec{DuffingEffectiveMethod},
+    hamiltonian_spec::EffectiveHamiltonianSpec{<:_DuffingLikeEffectiveMethod},
     dimension::Int,
     local_operators::_LocalOperatorCache,
 )
@@ -287,7 +294,7 @@ end
 
 function _local_hamiltonian(
     subsystem::Resonator,
-    ::EffectiveHamiltonianSpec,
+    ::EffectiveHamiltonianSpec{<:_DuffingLikeEffectiveMethod},
     ::Int,
     local_operators::_LocalOperatorCache,
 )
@@ -318,8 +325,14 @@ function _local_hamiltonian(
     ::Int,
     local_operators::_LocalOperatorCache,
 )
-    effective_EJ = _effective_josephson_energy(subsystem)
-    return _circuit_transmon_local_hamiltonian(effective_EJ, subsystem.EC, subsystem.ng, local_operators)
+    return _circuit_tunable_local_hamiltonian(
+        subsystem.EJmax,
+        subsystem.asymmetry,
+        subsystem.flux,
+        subsystem.EC,
+        subsystem.ng,
+        local_operators,
+    )
 end
 
 function _local_hamiltonian(
@@ -328,8 +341,14 @@ function _local_hamiltonian(
     ::Int,
     local_operators::_LocalOperatorCache,
 )
-    effective_EJ = _effective_josephson_energy(subsystem)
-    return _circuit_transmon_local_hamiltonian(effective_EJ, subsystem.EC, subsystem.ng, local_operators)
+    return _circuit_tunable_local_hamiltonian(
+        subsystem.EJmax,
+        subsystem.asymmetry,
+        subsystem.flux,
+        subsystem.EC,
+        subsystem.ng,
+        local_operators,
+    )
 end
 
 function _local_hamiltonian(
@@ -371,7 +390,23 @@ function _coupling_hamiltonian(coupling::AbstractCoupling, operator_cache::_Oper
 end
 
 function _effective_josephson_energy(subsystem::Union{TunableTransmon, TunableCoupler})
-    return subsystem.EJmax * sqrt(cospi(subsystem.flux)^2 + subsystem.asymmetry^2 * sinpi(subsystem.flux)^2)
+    return _effective_josephson_energy(subsystem.EJmax, subsystem.flux, subsystem.asymmetry)
+end
+
+function _effective_josephson_energy(EJmax::Float64, flux::Float64, asymmetry::Float64)
+    return EJmax * sqrt(cospi(flux)^2 + asymmetry^2 * sinpi(flux)^2)
+end
+
+function _effective_josephson_energy(EJmax::Real, flux::Real, asymmetry::Real)
+    return Float64(EJmax) * sqrt(cospi(Float64(flux))^2 + Float64(asymmetry)^2 * sinpi(Float64(flux))^2)
+end
+
+function _effective_circuit_coefficients(EJmax::Float64, flux::Float64, asymmetry::Float64)
+    return EJmax * cospi(flux), EJmax * asymmetry * sinpi(flux)
+end
+
+function _effective_circuit_coefficients(subsystem::_TunableSubsystem, flux::Real)
+    return _effective_circuit_coefficients(subsystem.EJmax, Float64(flux), subsystem.asymmetry)
 end
 
 function _duffing_local_hamiltonian(
@@ -382,10 +417,15 @@ function _duffing_local_hamiltonian(
     label::AbstractString,
 )
     identity_operator = eye(dimension)
+    ω, α = _duffing_parameters(EJ, EC; label = label)
+    return ω * number_operator + (α / 2) * number_operator * (number_operator - identity_operator)
+end
+
+function _duffing_parameters(EJ::Float64, EC::Float64; label::AbstractString)
     ω = sqrt(8 * EJ * EC) - EC
     ω > 0 || throw(ArgumentError("Duffing approximation for $label requires a positive local frequency; choose parameters with larger effective EJ."))
     α = -EC
-    return ω * number_operator + (α / 2) * number_operator * (number_operator - identity_operator)
+    return ω, α
 end
 
 function _circuit_transmon_local_hamiltonian(EJ::Float64, EC::Float64, ng::Float64, local_operators::_LocalOperatorCache)
@@ -393,6 +433,31 @@ function _circuit_transmon_local_hamiltonian(EJ::Float64, EC::Float64, ng::Float
     identity_operator = eye(size(charge_operator.data, 1))
     offset_charge = charge_operator - ng * identity_operator
     return 4 * EC * offset_charge * offset_charge - EJ * local_operators[:cosphi]
+end
+
+function _circuit_tunable_local_hamiltonian(
+    EJmax::Float64,
+    asymmetry::Float64,
+    flux::Float64,
+    EC::Float64,
+    ng::Float64,
+    local_operators::_LocalOperatorCache,
+)
+    charge_operator = local_operators[:charge]
+    identity_operator = eye(size(charge_operator.data, 1))
+    offset_charge = charge_operator - ng * identity_operator
+    josephson_cos, josephson_sin = _effective_circuit_coefficients(EJmax, flux, asymmetry)
+    return 4 * EC * offset_charge * offset_charge -
+        josephson_cos * local_operators[:cosphi] -
+        josephson_sin * local_operators[:sinphi]
+end
+
+function _subsystem(model::StaticSystemModel, target::Symbol)
+    for subsystem in subsystems(model.system)
+        name(subsystem) == target && return subsystem
+    end
+
+    throw(ArgumentError("No subsystem named $target exists in the model."))
 end
 
 include("Operators.jl")

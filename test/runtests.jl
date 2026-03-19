@@ -1,8 +1,19 @@
 using Test
 using QuantumCircuit
-using QuantumToolbox: expect
+using QuantumToolbox: expect, eye
 
 effective_EJ(EJmax, flux, asymmetry) = EJmax * sqrt(cospi(flux)^2 + asymmetry^2 * sinpi(flux)^2)
+
+function exact_tunable_circuit_hamiltonian(model, target, subsystem)
+    charge = charge_operator(model, target)
+    cosphi = cosphi_operator(model, target)
+    sinphi = sinphi_operator(model, target)
+    identity_operator = eye(size(charge.data, 1))
+    offset_charge = charge - subsystem.ng * identity_operator
+    return 4 * subsystem.EC * offset_charge * offset_charge -
+        subsystem.EJmax * cospi(subsystem.flux) * cosphi -
+        subsystem.EJmax * subsystem.asymmetry * sinpi(subsystem.flux) * sinphi
+end
 
 @testset "Architecture layer" begin
     q1 = Transmon(:q1; EJ = 20.0, EC = 0.25)
@@ -176,6 +187,11 @@ end
     @test spectrum(CompositeSystem(resonator); levels = 4, hamiltonian_spec = circuit_spec).energies ≈
         spectrum(CompositeSystem(resonator); levels = 4).energies atol = 1e-10
 
+    tq_asym = TunableTransmon(:tq_asym; EJmax = 21.0, EC = 0.23, flux = 0.17, asymmetry = 0.35, ng = 0.15, ncut = 6)
+    tq_asym_model = build_model(CompositeSystem(tq_asym); hamiltonian_spec = circuit_spec)
+    expected_tq_asym = exact_tunable_circuit_hamiltonian(tq_asym_model, :tq_asym, tq_asym)
+    @test hamiltonian(tq_asym_model).data ≈ expected_tq_asym.data atol = 1e-10
+
     circuit_model = build_model(CompositeSystem(q_ng0); hamiltonian_spec = circuit_spec)
     effective_model = build_model(CompositeSystem(q_ng0))
     resonator_model = build_model(CompositeSystem(resonator); hamiltonian_spec = circuit_spec)
@@ -187,6 +203,113 @@ end
     @test_throws ArgumentError number_operator(circuit_model, :q)
     @test_throws ArgumentError charge_operator(effective_model, :q)
     @test size(number_operator(resonator_model, :r1).data) == (4, 4)
+end
+
+@testset "FluxControl validation and circuit dynamics" begin
+    circuit_spec = CircuitHamiltonianSpec(charge_cutoff = 3)
+    tq = TunableTransmon(:q; EJmax = 20.0, EC = 0.25, flux = 0.15, asymmetry = 0.25, ng = 0.05, ncut = 6)
+    sys = CompositeSystem(tq)
+    ψ0 = basis_state(sys; hamiltonian_spec = circuit_spec, q = 0)
+    short_tlist = collect(range(0.0, 2.0; length = 21))
+    zero_control = FluxControl(:zero_flux, :q, (p, t) -> 0.0)
+    charge_observable = ObservableSpec(:charge, :q, :charge)
+
+    baseline = evolve(
+        sys,
+        ψ0,
+        short_tlist;
+        hamiltonian_spec = circuit_spec,
+        observables = [charge_observable],
+    )
+    zero_result = evolve(
+        sys,
+        ψ0,
+        short_tlist;
+        hamiltonian_spec = circuit_spec,
+        observables = [charge_observable],
+        flux_controls = [zero_control],
+    )
+    @test observable_trace(zero_result, :charge).values ≈ observable_trace(baseline, :charge).values atol = 1e-4
+
+    shifted_flux = 0.07
+    constant_control = FluxControl(:constant_flux, :q, (p, t) -> shifted_flux)
+    shifted_sys = with_subsystem_parameter(sys, :q, :flux, tq.flux + shifted_flux)
+    shifted_result = evolve(
+        shifted_sys,
+        basis_state(shifted_sys; hamiltonian_spec = circuit_spec, q = 0),
+        short_tlist;
+        hamiltonian_spec = circuit_spec,
+        observables = [charge_observable],
+    )
+    constant_result = evolve(
+        sys,
+        ψ0,
+        short_tlist;
+        hamiltonian_spec = circuit_spec,
+        observables = [charge_observable],
+        flux_controls = [constant_control],
+    )
+    @test observable_trace(constant_result, :charge).values ≈ observable_trace(shifted_result, :charge).values atol = 1e-4
+
+    flux_pulse = FluxControl(
+        :flux_pulse,
+        :q,
+        (p, t) -> p.δ * sin(p.ω * t);
+        derivative = (p, t) -> p.δ * p.ω * cos(p.ω * t),
+    )
+    long_tlist = collect(range(0.0, 16.0; length = 161))
+    pulsed_result = evolve(
+        sys,
+        ψ0,
+        long_tlist;
+        hamiltonian_spec = circuit_spec,
+        flux_controls = [flux_pulse],
+        observables = [charge_observable],
+        params = (; δ = 0.08, ω = 5.6),
+    )
+    pulsed_population = population_trace(pulsed_result, :q, 1)
+    @test maximum(pulsed_population.values) > 1e-4
+
+    qf = Transmon(:qf; EJ = 20.0, EC = 0.25, ncut = 6)
+    @test_throws ArgumentError evolve(
+        CompositeSystem(qf),
+        basis_state(CompositeSystem(qf); hamiltonian_spec = circuit_spec, qf = 0),
+        [0.0, 0.1];
+        hamiltonian_spec = circuit_spec,
+        flux_controls = [FluxControl(:bad_flux, :qf, (p, t) -> 0.0)],
+    )
+
+    @test_throws ArgumentError evolve(
+        sys,
+        ψ0,
+        short_tlist;
+        hamiltonian_spec = circuit_spec,
+        flux_controls = [
+            FluxControl(:dup_flux_a, :q, (p, t) -> 0.0),
+            FluxControl(:dup_flux_b, :q, (p, t) -> 0.01),
+        ],
+    )
+
+    other_tunable = TunableCoupler(:c; EJmax = 15.0, EC = 0.30, flux = 0.05, asymmetry = 0.15, ng = 0.0, ncut = 5)
+    uncoupled_sys = CompositeSystem(tq, other_tunable)
+    uncoupled_ψ0 = basis_state(uncoupled_sys; hamiltonian_spec = circuit_spec, q = 0, c = 0)
+    @test_throws ArgumentError evolve(
+        uncoupled_sys,
+        uncoupled_ψ0,
+        [0.0, 0.1];
+        hamiltonian_spec = circuit_spec,
+        flux_controls = [
+            FluxControl(:dup_label, :q, (p, t) -> 0.0),
+            FluxControl(:dup_label, :c, (p, t) -> 0.0),
+        ],
+    )
+
+    @test_throws ArgumentError evolve(
+        sys,
+        basis_state(sys; q = 0),
+        short_tlist;
+        flux_controls = [FluxControl(:effective_bad, :q, (p, t) -> 0.01)],
+    )
 end
 
 @testset "Circuit sweeps and dynamics" begin
@@ -487,6 +610,90 @@ end
     @test all(value -> 0.0 <= value <= 1.0 + 1e-6, p1_trace.values)
     @test p0_trace.values .+ p1_trace.values ≈ ones(length(tlist)) atol = 1e-6
     @test real(nr_trace.values[end]) != real(nr_trace.values[1])
+end
+
+@testset "Nonadiabatic effective flux dynamics" begin
+    nonadiabatic_spec = EffectiveHamiltonianSpec(NonadiabaticDuffingEffectiveMethod())
+    tq = TunableTransmon(:q; EJmax = 20.0, EC = 0.25, flux = 0.15, asymmetry = 0.25, ncut = 4)
+    sys = CompositeSystem(tq)
+    ψ0 = basis_state(sys; hamiltonian_spec = nonadiabatic_spec, q = 0)
+    tlist = collect(range(0.0, 24.0; length = 181))
+    flux_pulse = FluxControl(
+        :flux_drive,
+        :q,
+        (p, t) -> p.δ * sin(p.ωf * t);
+        derivative = (p, t) -> p.δ * p.ωf * cos(p.ωf * t),
+    )
+    drive = SubsystemDrive(
+        :q_x_drive,
+        :q,
+        :x,
+        (p, t) -> p.Ω * cos(p.ωd * t),
+    )
+
+    flux_only = evolve(
+        sys,
+        ψ0,
+        tlist;
+        hamiltonian_spec = nonadiabatic_spec,
+        flux_controls = [flux_pulse],
+        observables = [ObservableSpec(:nq, :q, :n)],
+        params = (; δ = 0.06, ωf = 6.0),
+    )
+    mixed_result = evolve(
+        sys,
+        ψ0,
+        tlist;
+        hamiltonian_spec = nonadiabatic_spec,
+        drives = [drive],
+        flux_controls = [flux_pulse],
+        observables = [ObservableSpec(:nq, :q, :n)],
+        params = (; δ = 0.06, ωf = 6.0, Ω = 0.02, ωd = 6.0),
+    )
+    flux_population = population_trace(flux_only, :q, 1)
+    mixed_population = population_trace(mixed_result, :q, 1)
+    @test maximum(flux_population.values) > 1e-4
+    @test maximum(abs.(real.(observable_trace(mixed_result, :nq).values) .- real.(observable_trace(flux_only, :nq).values))) > 1e-4
+
+    constant_shift = 0.04
+    constant_control = FluxControl(:constant_flux, :q, (p, t) -> constant_shift; derivative = (p, t) -> 0.0)
+    shifted_sys = with_subsystem_parameter(sys, :q, :flux, tq.flux + constant_shift)
+    shifted_result = evolve(
+        shifted_sys,
+        basis_state(shifted_sys; hamiltonian_spec = nonadiabatic_spec, q = 0),
+        tlist;
+        hamiltonian_spec = nonadiabatic_spec,
+        observables = [ObservableSpec(:nq, :q, :n)],
+    )
+    constant_result = evolve(
+        sys,
+        ψ0,
+        tlist;
+        hamiltonian_spec = nonadiabatic_spec,
+        flux_controls = [constant_control],
+        observables = [ObservableSpec(:nq, :q, :n)],
+    )
+    @test observable_trace(constant_result, :nq).values ≈ observable_trace(shifted_result, :nq).values atol = 1e-7
+
+    @test_throws ArgumentError evolve(
+        sys,
+        ψ0,
+        [0.0, 0.1];
+        hamiltonian_spec = nonadiabatic_spec,
+        flux_controls = [FluxControl(:missing_derivative, :q, (p, t) -> 0.01 * sin(t))],
+    )
+
+    resonator = Resonator(:r1; ω = 6.0, dim = 2)
+    coupled_sys = CompositeSystem(tq, resonator, CapacitiveCoupling(:q, :r1; g = 0.02))
+    coupled_ψ0 = basis_state(coupled_sys; hamiltonian_spec = nonadiabatic_spec, q = 0, r1 = 0)
+    @test_throws ArgumentError evolve(
+        coupled_sys,
+        coupled_ψ0,
+        [0.0, 0.1];
+        hamiltonian_spec = nonadiabatic_spec,
+        flux_controls = [flux_pulse],
+        params = (; δ = 0.01, ωf = 1.0),
+    )
 end
 
 @testset "Phase 3A tunable-coupler two-qubit dynamics" begin

@@ -5,6 +5,7 @@ using ..Architecture: CompositeSystem, with_coupling_parameter, with_subsystem_p
 using ..Model:
     AbstractHamiltonianSpec,
     EffectiveHamiltonianSpec,
+    FluxControl,
     ObservableSpec,
     StaticSystemModel,
     SubsystemDrive,
@@ -134,6 +135,7 @@ function evolve(
     hamiltonian_spec::AbstractHamiltonianSpec = EffectiveHamiltonianSpec(),
     observables = nothing,
     drives = nothing,
+    flux_controls = nothing,
     params = NamedTuple(),
     alg = nothing,
     progress_bar::Union{Val, Bool} = Val(false),
@@ -146,6 +148,7 @@ function evolve(
         tlist;
         observables = observables,
         drives = drives,
+        flux_controls = flux_controls,
         params = params,
         alg = alg,
         progress_bar = progress_bar,
@@ -160,6 +163,7 @@ function evolve(
     tlist::AbstractVector;
     observables = nothing,
     drives = nothing,
+    flux_controls = nothing,
     params = NamedTuple(),
     alg = nothing,
     progress_bar::Union{Val, Bool} = Val(false),
@@ -173,7 +177,7 @@ function evolve(
     observable_specs = _normalize_observables(observables)
     _validate_unique_observable_labels(observable_specs)
 
-    H = _time_dependent_hamiltonian(model, drives)
+    H = _time_dependent_hamiltonian(model, drives, flux_controls)
     e_ops = isempty(observable_specs) ? nothing : [_embedded_operator(model, spec.target, spec.operator) for spec in observable_specs]
 
     solver_kwargs = (; e_ops, params, progress_bar, inplace, saveat = tlist, kwargs...)
