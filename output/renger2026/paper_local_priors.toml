@@ -80,5 +80,5 @@ qb1_ej_over_ec = 74.2
 beta_qr = 0.002
 coupler_alpha_prior_ghz = -0.11
 qb2_ej_ghz = 13.8
-cr_f01_ghz = 4.22
+cr_f01_ghz = 4.2
 qb1_f01_ghz = 4.67
