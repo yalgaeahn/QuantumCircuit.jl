@@ -1,6 +1,6 @@
 paper = "Renger et al. (2026)"
 scope = "Local single-device priors for QB1-TC1-CR-TC2-QB2"
-notes = "Qubit fits are frozen local priors. Coupler fits are weakly identified and intended only as initialization for later coupled-model fitting."
+notes = "Qubit fits are frozen local priors. TC1/TC2 remain baseline local priors from local single-device inference. CR uses the Table II paper-exact 4.22 GHz target."
 schema = "paper_local_priors_v1"
 source_notebook = "output/jupyter-notebook/renger2026-parameter-inference.ipynb"
 
@@ -80,5 +80,5 @@ qb1_ej_over_ec = 74.2
 beta_qr = 0.002
 coupler_alpha_prior_ghz = -0.11
 qb2_ej_ghz = 13.8
-cr_f01_ghz = 4.2
+cr_f01_ghz = 4.22
 qb1_f01_ghz = 4.67

@@ -14,11 +14,19 @@ struct Renger2026Snapshot
     targets::Dict{String, Any}
 end
 
-function load_renger2026_snapshot(path::AbstractString = _renger2026_snapshot_path())
+function load_renger2026_snapshot(
+    path::AbstractString = _renger2026_snapshot_path();
+    overlay_path::Union{Nothing, AbstractString} = nothing,
+)
     parsed = TOML.parsefile(path)
+    if overlay_path !== nothing
+        overlay = TOML.parsefile(overlay_path)
+        parsed = _deep_merge_dict(parsed, overlay)
+    end
     devices = Dict(Symbol(name) => Dict{String, Any}(data) for (name, data) in parsed["devices"])
     targets = Dict{String, Any}(parsed["targets"])
-    return Renger2026Snapshot(String(path), devices, targets)
+    merged_path = overlay_path === nothing ? String(path) : string(path, " + ", overlay_path)
+    return Renger2026Snapshot(merged_path, devices, targets)
 end
 
 function renger2026_stage1_qr_system(
@@ -47,7 +55,7 @@ function renger2026_stage1_qcr_system(
     coupler_device = _renger2026_coupler(snapshot.devices, coupler; ncut = coupler_ncut)
     resonator = Resonator(:CR; ω = Float64(targets["cr_f01_ghz"]), dim = resonator_dim)
     g_qc = _seed_effective_coupling(Float64(_beta_qc(targets, qubit)), _device_frequency(snapshot.devices[qubit]), _device_frequency(snapshot.devices[coupler]))
-    g_cr = _seed_effective_coupling(Float64(targets["beta_cr"]), _device_frequency(snapshot.devices[coupler]), resonator.ω)
+    g_cr = _seed_effective_coupling(Float64(_beta_cr(targets)), _device_frequency(snapshot.devices[coupler]), resonator.ω)
 
     system = CompositeSystem(
         qubit_device,
@@ -76,8 +84,8 @@ function renger2026_reduced_system(
     if model == :effective
         g_q1c1 = _seed_effective_coupling(Float64(_beta_qc(snapshot.targets, :QB1)), _device_frequency(snapshot.devices[:QB1]), _device_frequency(snapshot.devices[:TC1]))
         g_q2c2 = _seed_effective_coupling(Float64(_beta_qc(snapshot.targets, :QB2)), _device_frequency(snapshot.devices[:QB2]), _device_frequency(snapshot.devices[:TC2]))
-        g_c1r = _seed_effective_coupling(Float64(snapshot.targets["beta_cr"]), _device_frequency(snapshot.devices[:TC1]), resonator.ω)
-        g_c2r = _seed_effective_coupling(Float64(snapshot.targets["beta_cr"]), _device_frequency(snapshot.devices[:TC2]), resonator.ω)
+        g_c1r = _seed_effective_coupling(Float64(_beta_cr(snapshot.targets)), _device_frequency(snapshot.devices[:TC1]), resonator.ω)
+        g_c2r = _seed_effective_coupling(Float64(_beta_cr(snapshot.targets)), _device_frequency(snapshot.devices[:TC2]), resonator.ω)
 
         system = CompositeSystem(
             q1,
@@ -99,8 +107,8 @@ function renger2026_reduced_system(
             c2,
             q2,
             CircuitCapacitiveCoupling(:QB1, :TC1; G = Float64(_beta_qc(snapshot.targets, :QB1))),
-            CircuitCapacitiveCoupling(:TC1, :CR; G = Float64(snapshot.targets["beta_cr"])),
-            CircuitCapacitiveCoupling(:CR, :TC2; G = Float64(snapshot.targets["beta_cr"])),
+            CircuitCapacitiveCoupling(:TC1, :CR; G = Float64(_beta_cr(snapshot.targets))),
+            CircuitCapacitiveCoupling(:CR, :TC2; G = Float64(_beta_cr(snapshot.targets))),
             CircuitCapacitiveCoupling(:TC2, :QB2; G = Float64(_beta_qc(snapshot.targets, :QB2))),
         )
         return (; system, hamiltonian_spec = CircuitHamiltonianSpec(charge_cutoff = charge_cutoff))
@@ -167,3 +175,16 @@ end
 _device_frequency(device::Dict{String, Any}) = Float64(device["f01_ghz"])
 _seed_effective_coupling(beta::Float64, ωa::Float64, ωb::Float64) = beta * sqrt(ωa * ωb)
 _beta_qc(targets::Dict{String, Any}, qubit::Symbol) = qubit == :QB1 ? targets["beta_qc_qb1"] : targets["beta_qc_qb2"]
+_beta_cr(targets::Dict{String, Any}) = targets["beta_cr"]
+
+function _deep_merge_dict(base::Dict, overlay::Dict)
+    merged = deepcopy(base)
+    for (key, value) in overlay
+        if haskey(merged, key) && merged[key] isa Dict && value isa Dict
+            merged[key] = _deep_merge_dict(merged[key], value)
+        else
+            merged[key] = deepcopy(value)
+        end
+    end
+    return merged
+end

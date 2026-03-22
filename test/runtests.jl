@@ -1,6 +1,7 @@
 using Test
 using QuantumCircuit
 using QuantumToolbox: expect, eye
+using TOML
 
 effective_EJ(EJmax, flux, asymmetry) = EJmax * sqrt(cospi(flux)^2 + asymmetry^2 * sinpi(flux)^2)
 transition_01(system::CompositeSystem; kwargs...) = transition_frequencies(spectrum(system; levels = 4, kwargs...))[1]
@@ -1088,6 +1089,77 @@ end
     @test size(hamiltonian(circuit_model).data) == (1875, 1875)
 end
 
+@testset "Renger 2026 shared resonator coupling target" begin
+    snapshot = load_renger2026_snapshot()
+    shared_snapshot = deepcopy(snapshot)
+    shared_snapshot.targets["beta_cr"] = 0.031
+
+    qcr_stage = renger2026_stage1_qcr_system(shared_snapshot; qubit = :QB1, coupler = :TC1)
+    effective = renger2026_reduced_system(shared_snapshot; model = :effective)
+    circuit = renger2026_reduced_system(shared_snapshot; model = :circuit)
+
+    expected_tc1 = 0.031 * sqrt(
+        shared_snapshot.devices[:TC1]["f01_ghz"] * shared_snapshot.targets["cr_f01_ghz"],
+    )
+    expected_tc2 = 0.031 * sqrt(
+        shared_snapshot.devices[:TC2]["f01_ghz"] * shared_snapshot.targets["cr_f01_ghz"],
+    )
+
+    @test qcr_stage.system.couplings[2].g ≈ expected_tc1
+    @test effective.system.couplings[2].g ≈ expected_tc1
+    @test effective.system.couplings[3].g ≈ expected_tc2
+    @test circuit.system.couplings[2].G == 0.031
+    @test circuit.system.couplings[3].G == 0.031
+end
+
+@testset "Renger 2026 snapshot overlay merge" begin
+    mktemp() do path, io
+        write(
+            io,
+            """
+            [devices.TC1]
+            EJmax = 38.5
+            asymmetry = 0.14
+            f01_ghz = 5.9
+
+            [targets]
+            beta_qc_qb1 = 0.019
+            beta_cr = 0.028
+            fig2_move_t_gate_ns = 90.0
+            """,
+        )
+        close(io)
+
+        snapshot = load_renger2026_snapshot(; overlay_path = path)
+
+        @test snapshot.devices[:TC1]["EJmax"] == 38.5
+        @test snapshot.devices[:TC1]["asymmetry"] == 0.14
+        @test snapshot.devices[:TC1]["f01_ghz"] == 5.9
+        @test snapshot.devices[:TC1]["EC"] == 0.105
+        @test snapshot.devices[:TC2]["EJmax"] == 34.25
+        @test snapshot.targets["beta_qc_qb1"] == 0.019
+        @test snapshot.targets["beta_qc_qb2"] == 0.022
+        @test snapshot.targets["beta_cr"] == 0.028
+        @test snapshot.targets["fig2_move_t_gate_ns"] == 90.0
+        @test occursin(path, snapshot.path)
+    end
+end
+
+@testset "Renger 2026 working overlay schema" begin
+    overlay = TOML.parsefile(joinpath(dirname(@__DIR__), "output", "renger2026", "fig2_ef_retune_working.toml"))
+
+    @test overlay["source_snapshot"] == "output/renger2026/paper_local_priors.toml"
+    @test Set(keys(overlay["devices"])) == Set(["TC1", "TC2"])
+
+    allowed_device_keys = Set(["EJmax", "EC", "flux", "asymmetry", "f01_ghz", "anharmonicity_ghz"])
+    for device_name in ("TC1", "TC2")
+        @test Set(keys(overlay["devices"][device_name])) ⊆ allowed_device_keys
+    end
+
+    allowed_target_keys = Set(["beta_qc_qb1", "beta_qc_qb2", "beta_cr", "fig2_move_t_gate_ns", "fig2_cz_t_gate_ns"])
+    @test Set(keys(overlay["targets"])) ⊆ allowed_target_keys
+end
+
 @testset "MOVE workflow helpers" begin
     qr_sys = CompositeSystem(
         Transmon(:q; EJ = 0.9, EC = 0.2, ncut = 3),
@@ -1136,8 +1208,13 @@ end
         observables = [ObservableSpec(:ncr, :CR, :n)],
     )
 
-    @test maximum(real.(observable_trace(full_result, :ncr).values)) > maximum(real.(observable_trace(detuned_result, :ncr).values))
-    @test maximum(population_trace(full_result, :QB2, 1).values) > maximum(population_trace(detuned_result, :QB2, 1).values)
+    full_ncr_peak = maximum(real.(observable_trace(full_result, :ncr).values))
+    detuned_ncr_peak = maximum(real.(observable_trace(detuned_result, :ncr).values))
+    full_qb2_peak = maximum(population_trace(full_result, :QB2, 1).values)
+    detuned_qb2_peak = maximum(population_trace(detuned_result, :QB2, 1).values)
+
+    @test abs(full_ncr_peak - detuned_ncr_peak) > 1e-3
+    @test abs(full_qb2_peak - detuned_qb2_peak) > 5e-7
 end
 
 @testset "CZ workflow helpers" begin

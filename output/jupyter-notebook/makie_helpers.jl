@@ -95,6 +95,8 @@ function heatmap_figure(
     size = NOTEBOOK_WIDE,
     colormap = :viridis,
     colorrange = nothing,
+    xlims = nothing,
+    ylims = nothing,
 )
     fig = Figure(size = size)
     ax = Axis(fig[1, 1]; title, xlabel, ylabel)
@@ -103,6 +105,8 @@ function heatmap_figure(
     hm = isnothing(colorrange) ?
         image!(ax, xspan, yspan, matrix; colormap, interpolate = false) :
         image!(ax, xspan, yspan, matrix; colormap, colorrange, interpolate = false)
+    isnothing(xlims) || xlims!(ax, xlims...)
+    isnothing(ylims) || ylims!(ax, ylims...)
     Colorbar(fig[1, 2], hm; label = colorlabel)
     return fig
 end
