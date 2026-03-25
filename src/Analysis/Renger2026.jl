@@ -38,7 +38,7 @@ function renger2026_stage1_qr_system(
     targets = snapshot.targets
     qubit_device = _renger2026_transmon(snapshot.devices, qubit; ncut = qubit_ncut)
     resonator = Resonator(:CR; ω = Float64(targets["cr_f01_ghz"]), dim = resonator_dim)
-    coupling = CapacitiveCoupling(qubit, :CR; g = _seed_effective_coupling(Float64(targets["beta_qr"]), _device_frequency(snapshot.devices[qubit]), resonator.ω))
+    coupling = CapacitiveCoupling(qubit, :CR; g = _g_qr(targets, qubit))
     return (; system = CompositeSystem(qubit_device, resonator, coupling), hamiltonian_spec = EffectiveHamiltonianSpec())
 end
 
@@ -54,8 +54,8 @@ function renger2026_stage1_qcr_system(
     qubit_device = _renger2026_transmon(snapshot.devices, qubit; ncut = qubit_ncut)
     coupler_device = _renger2026_coupler(snapshot.devices, coupler; ncut = coupler_ncut)
     resonator = Resonator(:CR; ω = Float64(targets["cr_f01_ghz"]), dim = resonator_dim)
-    g_qc = _seed_effective_coupling(Float64(_beta_qc(targets, qubit)), _device_frequency(snapshot.devices[qubit]), _device_frequency(snapshot.devices[coupler]))
-    g_cr = _seed_effective_coupling(Float64(_beta_cr(targets)), _device_frequency(snapshot.devices[coupler]), resonator.ω)
+    g_qc = _g_qc(targets, qubit, coupler)
+    g_cr = _g_cr(targets, coupler)
 
     system = CompositeSystem(
         qubit_device,
@@ -82,10 +82,10 @@ function renger2026_reduced_system(
     resonator = Resonator(:CR; ω = Float64(snapshot.targets["cr_f01_ghz"]), dim = resonator_dim)
 
     if model == :effective
-        g_q1c1 = _seed_effective_coupling(Float64(_beta_qc(snapshot.targets, :QB1)), _device_frequency(snapshot.devices[:QB1]), _device_frequency(snapshot.devices[:TC1]))
-        g_q2c2 = _seed_effective_coupling(Float64(_beta_qc(snapshot.targets, :QB2)), _device_frequency(snapshot.devices[:QB2]), _device_frequency(snapshot.devices[:TC2]))
-        g_c1r = _seed_effective_coupling(Float64(_beta_cr(snapshot.targets)), _device_frequency(snapshot.devices[:TC1]), resonator.ω)
-        g_c2r = _seed_effective_coupling(Float64(_beta_cr(snapshot.targets)), _device_frequency(snapshot.devices[:TC2]), resonator.ω)
+        g_q1c1 = _g_qc(snapshot.targets, :QB1, :TC1)
+        g_q2c2 = _g_qc(snapshot.targets, :QB2, :TC2)
+        g_c1r = _g_cr(snapshot.targets, :TC1)
+        g_c2r = _g_cr(snapshot.targets, :TC2)
 
         system = CompositeSystem(
             q1,
@@ -172,10 +172,11 @@ function _renger2026_coupler(devices::Dict{Symbol, Dict{String, Any}}, name::Sym
     )
 end
 
-_device_frequency(device::Dict{String, Any}) = Float64(device["f01_ghz"])
-_seed_effective_coupling(beta::Float64, ωa::Float64, ωb::Float64) = beta * sqrt(ωa * ωb)
 _beta_qc(targets::Dict{String, Any}, qubit::Symbol) = qubit == :QB1 ? targets["beta_qc_qb1"] : targets["beta_qc_qb2"]
 _beta_cr(targets::Dict{String, Any}) = targets["beta_cr"]
+_g_qr(targets::Dict{String, Any}, qubit::Symbol) = qubit == :QB1 ? Float64(targets["g_qr_qb1"]) : qubit == :QB2 ? Float64(targets["g_qr_qb2"]) : throw(ArgumentError("Unsupported qubit $qubit for QR seed coupling."))
+_g_qc(targets::Dict{String, Any}, qubit::Symbol, coupler::Symbol) = qubit == :QB1 && coupler == :TC1 ? Float64(targets["g_qc_qb1_tc1"]) : qubit == :QB2 && coupler == :TC2 ? Float64(targets["g_qc_qb2_tc2"]) : throw(ArgumentError("Unsupported qubit-coupler pair ($qubit, $coupler) for QC seed coupling."))
+_g_cr(targets::Dict{String, Any}, coupler::Symbol) = coupler == :TC1 ? Float64(targets["g_cr_tc1"]) : coupler == :TC2 ? Float64(targets["g_cr_tc2"]) : throw(ArgumentError("Unsupported coupler $coupler for CR seed coupling."))
 
 function _deep_merge_dict(base::Dict, overlay::Dict)
     merged = deepcopy(base)

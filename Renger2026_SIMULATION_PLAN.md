@@ -64,10 +64,15 @@ Primary parameter sources:
 
 ## Parameter interpretation
 
-- `QB1` and `QB2` priors are treated as frozen local priors.
-- `TC1` and `TC2` priors remain weakly identified initialization points.
-- `CR` uses the paper resonator frequency target from `paper_local_priors.toml`.
-- Effective couplings are seeded as `beta * sqrt(ωa * ωb)`.
+- `QB1` and `QB2` device fields now store bare local back-out priors chosen so the parked reduced effective model matches the paper dressed qubit frequencies while the isolated local qubit anharmonicity stays near `-0.187 GHz`.
+- `devices.QB*.f01_ghz` in the frozen snapshot are isolated local bare frequencies derived from the current exact model.
+- `targets.qb*_dressed_f01_ghz` store the paper dressed references separately.
+- `targets.qb*_alpha_ghz` store the qubit anharmonicity targets separately.
+- Table II qubit `EJ`, `EJ/EC`, and derived `EC` remain paper metadata in `targets`, not hard device constraints.
+- `TC1` and `TC2` priors remain weakly identified initialization points, but their parked isolated local targets are explicitly anchored at `f01 = 6.5 GHz` and `alpha = -0.11 GHz`.
+- `TC1` and `TC2` keep `flux = 0.0` and `asymmetry = 0.10` in the baseline local-prior solve; only `EC/EJmax` are refit there.
+- `CR` uses the bare resonator Hamiltonian frequency from `paper_local_priors.toml` (`4.3 GHz`), while the paper dressed reference (`4.22 GHz`) is stored separately for reporting.
+- Effective couplings are seeded from explicit `g_*` values frozen in the snapshot.
 - Circuit couplings use the raw `beta_*` values as provisional `G` seeds.
 - These seeded couplings are not device truth and must be refit against coupled spectra and gate data.
 

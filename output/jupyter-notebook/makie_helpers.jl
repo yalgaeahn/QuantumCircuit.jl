@@ -100,11 +100,9 @@ function heatmap_figure(
 )
     fig = Figure(size = size)
     ax = Axis(fig[1, 1]; title, xlabel, ylabel)
-    xspan = (minimum(x_values), maximum(x_values))
-    yspan = (minimum(y_values), maximum(y_values))
     hm = isnothing(colorrange) ?
-        image!(ax, xspan, yspan, matrix; colormap, interpolate = false) :
-        image!(ax, xspan, yspan, matrix; colormap, colorrange, interpolate = false)
+        heatmap!(ax, x_values, y_values, matrix'; colormap) :
+        heatmap!(ax, x_values, y_values, matrix'; colormap, colorrange)
     isnothing(xlims) || xlims!(ax, xlims...)
     isnothing(ylims) || ylims!(ax, ylims...)
     Colorbar(fig[1, 2], hm; label = colorlabel)

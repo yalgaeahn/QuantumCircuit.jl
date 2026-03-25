@@ -42,6 +42,7 @@ function parameter_rows(snapshot; move_t_gate_ns, cz_t_gate_ns, charge_cutoff)
             device = "QB1",
             fit = snapshot.devices[:QB1]["fit_classification"],
             f01_ghz = round4(snapshot.devices[:QB1]["f01_ghz"]),
+            paper_dressed_f01_ghz = compact_value(get(snapshot.targets, "qb1_dressed_f01_ghz", get(snapshot.targets, "qb1_f01_ghz", missing))),
             EC_ghz = round4(snapshot.devices[:QB1]["EC"]),
             EJmax_ghz = round4(snapshot.devices[:QB1]["EJmax"]),
             flux = round4(snapshot.devices[:QB1]["flux"]),
@@ -51,6 +52,7 @@ function parameter_rows(snapshot; move_t_gate_ns, cz_t_gate_ns, charge_cutoff)
             device = "TC1",
             fit = snapshot.devices[:TC1]["fit_classification"],
             f01_ghz = round4(snapshot.devices[:TC1]["f01_ghz"]),
+            paper_dressed_f01_ghz = missing,
             EC_ghz = round4(snapshot.devices[:TC1]["EC"]),
             EJmax_ghz = round4(snapshot.devices[:TC1]["EJmax"]),
             flux = round4(snapshot.devices[:TC1]["flux"]),
@@ -60,6 +62,7 @@ function parameter_rows(snapshot; move_t_gate_ns, cz_t_gate_ns, charge_cutoff)
             device = "QB2",
             fit = snapshot.devices[:QB2]["fit_classification"],
             f01_ghz = round4(snapshot.devices[:QB2]["f01_ghz"]),
+            paper_dressed_f01_ghz = compact_value(get(snapshot.targets, "qb2_dressed_f01_ghz", get(snapshot.targets, "qb2_f01_ghz", missing))),
             EC_ghz = round4(snapshot.devices[:QB2]["EC"]),
             EJmax_ghz = round4(snapshot.devices[:QB2]["EJmax"]),
             flux = round4(snapshot.devices[:QB2]["flux"]),
@@ -69,6 +72,7 @@ function parameter_rows(snapshot; move_t_gate_ns, cz_t_gate_ns, charge_cutoff)
             device = "TC2",
             fit = snapshot.devices[:TC2]["fit_classification"],
             f01_ghz = round4(snapshot.devices[:TC2]["f01_ghz"]),
+            paper_dressed_f01_ghz = missing,
             EC_ghz = round4(snapshot.devices[:TC2]["EC"]),
             EJmax_ghz = round4(snapshot.devices[:TC2]["EJmax"]),
             flux = round4(snapshot.devices[:TC2]["flux"]),
@@ -76,18 +80,24 @@ function parameter_rows(snapshot; move_t_gate_ns, cz_t_gate_ns, charge_cutoff)
         ),
         (
             device = "CR",
-            fit = "paper target",
+            fit = "bare model input",
             f01_ghz = round4(snapshot.targets["cr_f01_ghz"]),
+            paper_dressed_f01_ghz = compact_value(get(snapshot.targets, "cr_dressed_f01_ghz", missing)),
             EC_ghz = missing,
             EJmax_ghz = missing,
             flux = missing,
             asymmetry = missing,
         ),
     ], (
+        qb1_bare_f01_ghz = round4(snapshot.devices[:QB1]["f01_ghz"]),
+        qb1_dressed_f01_ghz = compact_value(get(snapshot.targets, "qb1_dressed_f01_ghz", get(snapshot.targets, "qb1_f01_ghz", missing))),
+        qb2_bare_f01_ghz = round4(snapshot.devices[:QB2]["f01_ghz"]),
+        qb2_dressed_f01_ghz = compact_value(get(snapshot.targets, "qb2_dressed_f01_ghz", get(snapshot.targets, "qb2_f01_ghz", missing))),
         beta_qc_qb1 = round4(snapshot.targets["beta_qc_qb1"]),
         beta_qc_qb2 = round4(snapshot.targets["beta_qc_qb2"]),
         beta_cr = round4(snapshot.targets["beta_cr"]),
         cr_f01_ghz = round4(snapshot.targets["cr_f01_ghz"]),
+        cr_dressed_f01_ghz = compact_value(get(snapshot.targets, "cr_dressed_f01_ghz", missing)),
         move_t_gate_ns = round4(move_t_gate_ns),
         cz_t_gate_ns = round4(cz_t_gate_ns),
         charge_cutoff = charge_cutoff,
@@ -118,8 +128,8 @@ function snapshot_with_overrides(snapshot; device_overrides = Dict{Symbol, Any}(
     return typeof(snapshot)(snapshot.path, devices, targets)
 end
 
-branch_tc_flux_offset(snapshot, branch::Symbol) = Float64(get(snapshot.devices[branch_spec(branch).tc_key], "flux", 0.0))
-effective_tc_flux(snapshot, tc_flux; branch = :move) = tc_flux + branch_tc_flux_offset(snapshot, branch)
+branch_q_park_flux(snapshot, branch::Symbol) = Float64(snapshot.devices[branch_spec(branch).qb_key]["flux"])
+branch_tc_park_flux(snapshot, branch::Symbol) = Float64(snapshot.devices[branch_spec(branch).tc_key]["flux"])
 
 function local_qb(snapshot, flux; branch = :move, ncut = 5)
     spec = branch_spec(branch)
@@ -142,7 +152,7 @@ function local_tc(snapshot, flux; branch = :move, ncut = 4)
         :TC;
         EJmax = p["EJmax"],
         EC = p["EC"],
-        flux = effective_tc_flux(snapshot, flux; branch),
+        flux = flux,
         asymmetry = p["asymmetry"],
         ng = p["ng"],
         ncut = ncut,
@@ -165,7 +175,7 @@ end
 
 function retuned_system(base_system::CompositeSystem, snapshot; branch = :move, q_flux, tc_flux)
     step1 = with_subsystem_parameter(base_system, :QB, :flux, q_flux)
-    return with_subsystem_parameter(step1, :TC, :flux, effective_tc_flux(snapshot, tc_flux; branch))
+    return with_subsystem_parameter(step1, :TC, :flux, tc_flux)
 end
 
 function local_eigenbundle(subsystem; charge_cutoff)
@@ -431,20 +441,274 @@ function local_projector_qlevel(snapshot, q_flux, tc_flux, qlevel; branch = :mov
     return kron(Pq, Itc, Icr)
 end
 
+function local_projector_crlevel(snapshot, q_flux, tc_flux, crlevel; branch = :move, charge_cutoff, qb_ncut = 5, tc_ncut = 4, resonator_dim = 3)
+    _, qstates = q_bundle(snapshot, q_flux; branch, charge_cutoff, qb_ncut)
+    _, tcstates = tc_bundle(snapshot, tc_flux; branch, charge_cutoff, tc_ncut)
+    _, crstates = cr_bundle(snapshot; resonator_dim)
+    Iq = sum(ψ * dag(ψ) for ψ in qstates)
+    Itc = sum(ψ * dag(ψ) for ψ in tcstates)
+    Pcr = crstates[crlevel + 1] * dag(crstates[crlevel + 1])
+    return kron(Iq, Itc, Pcr)
+end
+
+function parked_branch_context(
+    base_system,
+    snapshot,
+    init_levels;
+    branch = :move,
+    charge_cutoff,
+    qb_ncut = 5,
+    tc_ncut = 4,
+    resonator_dim = 3,
+)
+    park_q_flux = branch_q_park_flux(snapshot, branch)
+    park_tc_flux = branch_tc_park_flux(snapshot, branch)
+    return (
+        branch = branch,
+        charge_cutoff = charge_cutoff,
+        qb_ncut = qb_ncut,
+        tc_ncut = tc_ncut,
+        resonator_dim = resonator_dim,
+        park_q_flux = park_q_flux,
+        park_tc_flux = park_tc_flux,
+        model = build_model(base_system; hamiltonian_spec = local_spec(; charge_cutoff)),
+        ψ0 = diabatic_state(snapshot, park_q_flux, park_tc_flux, init_levels...; branch, charge_cutoff, qb_ncut, tc_ncut, resonator_dim),
+        P_g = local_projector_qlevel(snapshot, park_q_flux, park_tc_flux, 0; branch, charge_cutoff, qb_ncut, tc_ncut, resonator_dim),
+        P_e = local_projector_qlevel(snapshot, park_q_flux, park_tc_flux, 1; branch, charge_cutoff, qb_ncut, tc_ncut, resonator_dim),
+        P_f = local_projector_qlevel(snapshot, park_q_flux, park_tc_flux, 2; branch, charge_cutoff, qb_ncut, tc_ncut, resonator_dim),
+        P_cr1 = local_projector_crlevel(snapshot, park_q_flux, park_tc_flux, 1; branch, charge_cutoff, qb_ncut, tc_ncut, resonator_dim),
+        flux_controls = [
+            FluxControl(Symbol(branch, :_q_flux), :QB, (p, t) -> ramp_hold_ramp_flux(t, p.q_delta, p.ramp_ns, p.hold_ns)),
+            FluxControl(Symbol(branch, :_tc_flux), :TC, (p, t) -> ramp_hold_ramp_flux(t, p.tc_delta, p.ramp_ns, p.hold_ns)),
+        ],
+    )
+end
+
+function ramp_hold_ramp_flux(t, delta_flux, ramp_ns, hold_ns)
+    ramp_ns <= 0 && return 0.0 <= t <= hold_ns ? delta_flux : 0.0
+    if t <= 0.0
+        return 0.0
+    elseif t < ramp_ns
+        return delta_flux * (t / ramp_ns)
+    elseif t <= ramp_ns + hold_ns
+        return delta_flux
+    elseif t < 2 * ramp_ns + hold_ns
+        return delta_flux * (1 - (t - ramp_ns - hold_ns) / ramp_ns)
+    else
+        return 0.0
+    end
+end
+
+pulse_total_time_ns(hold_ns, ramp_ns) = hold_ns + 2 * ramp_ns
+
+function default_pulse_trace_tlist(hold_ns, ramp_ns; step_ns = 1.0)
+    total_time = pulse_total_time_ns(hold_ns, ramp_ns)
+    steps = max(2, Int(ceil(total_time / step_ns)) + 1)
+    return collect(range(0.0, total_time; length = steps))
+end
+
+function pulse_population_trace(
+    context,
+    snapshot,
+    q_flux,
+    tc_flux,
+    hold_ns;
+    ramp_ns,
+    branch = context.branch,
+)
+    total_time = pulse_total_time_ns(hold_ns, ramp_ns)
+    times = default_pulse_trace_tlist(hold_ns, ramp_ns)
+    params = (
+        q_delta = q_flux - context.park_q_flux,
+        tc_delta = tc_flux - context.park_tc_flux,
+        ramp_ns = ramp_ns,
+        hold_ns = hold_ns,
+    )
+    result = evolve(context.model, context.ψ0, times; flux_controls = context.flux_controls, params)
+    p_g = Float64[real(dag(ψ) * context.P_g * ψ) for ψ in result.states]
+    p_e = Float64[real(dag(ψ) * context.P_e * ψ) for ψ in result.states]
+    p_f = Float64[real(dag(ψ) * context.P_f * ψ) for ψ in result.states]
+    p_cr1 = Float64[real(dag(ψ) * context.P_cr1 * ψ) for ψ in result.states]
+    leakage_proxy = max.(0.0, 1 .- (p_g .+ p_e .+ p_f))
+    return (
+        times = times,
+        p_g = p_g,
+        p_e = p_e,
+        p_f = p_f,
+        p_cr1 = p_cr1,
+        leakage_proxy = leakage_proxy,
+        transfer_score = 1.0 - p_e[end],
+        final_p_g = p_g[end],
+        final_p_e = p_e[end],
+        final_p_f = p_f[end],
+        final_p_cr1 = p_cr1[end],
+        final_leakage_proxy = leakage_proxy[end],
+        final_time_ns = total_time,
+        hold_ns = hold_ns,
+        ramp_ns = ramp_ns,
+        q_flux = q_flux,
+        tc_flux = tc_flux,
+        q_ghz = qubit_frequency(snapshot, q_flux; branch, charge_cutoff = context.charge_cutoff, qb_ncut = context.qb_ncut),
+        tc_ghz = coupler_frequency(snapshot, tc_flux; branch, charge_cutoff = context.charge_cutoff, tc_ncut = context.tc_ncut),
+    )
+end
+
+function pulse_population_trace(
+    base_system,
+    snapshot,
+    q_flux,
+    tc_flux,
+    init_levels,
+    hold_ns;
+    branch = :move,
+    ramp_ns,
+    charge_cutoff,
+    qb_ncut = 5,
+    tc_ncut = 4,
+    resonator_dim = 3,
+)
+    context = parked_branch_context(
+        base_system,
+        snapshot,
+        init_levels;
+        branch,
+        charge_cutoff,
+        qb_ncut,
+        tc_ncut,
+        resonator_dim,
+    )
+    return pulse_population_trace(context, snapshot, q_flux, tc_flux, hold_ns; ramp_ns, branch)
+end
+
+function pulse_population_metric(trace; metric = :move)
+    if metric == :cz
+        return (
+            value = trace.final_p_f,
+            best_time_ns = trace.final_time_ns,
+            aux = trace.final_p_e,
+            final_p_e = trace.final_p_e,
+            final_p_f = trace.final_p_f,
+        )
+    end
+
+    if metric == :move_transfer
+        return (
+            value = trace.transfer_score,
+            best_time_ns = trace.final_time_ns,
+            aux = trace.final_p_cr1,
+            final_p_g = trace.final_p_g,
+            final_p_e = trace.final_p_e,
+            final_p_f = trace.final_p_f,
+            final_p_cr1 = trace.final_p_cr1,
+            transfer_score = trace.transfer_score,
+            leakage_proxy = trace.final_leakage_proxy,
+        )
+    end
+
+    if metric == :move_cr1
+        return (
+            value = trace.final_p_cr1,
+            best_time_ns = trace.final_time_ns,
+            aux = trace.transfer_score,
+            final_p_g = trace.final_p_g,
+            final_p_e = trace.final_p_e,
+            final_p_f = trace.final_p_f,
+            final_p_cr1 = trace.final_p_cr1,
+            transfer_score = trace.transfer_score,
+            leakage_proxy = trace.final_leakage_proxy,
+        )
+    end
+
+    return (
+        value = trace.final_p_e,
+        best_time_ns = trace.final_time_ns,
+        aux = trace.final_p_cr1,
+        final_p_g = trace.final_p_g,
+        final_p_e = trace.final_p_e,
+        final_p_f = trace.final_p_f,
+        final_p_cr1 = trace.final_p_cr1,
+        transfer_score = trace.transfer_score,
+        leakage_proxy = trace.final_leakage_proxy,
+    )
+end
+
+function qubit_population_trace(base_system, snapshot, q_flux, tc_flux, init_levels, tlist; branch = :move, charge_cutoff, qb_ncut = 5, tc_ncut = 4, resonator_dim = 3)
+    times = Float64.(collect(tlist))
+    system = retuned_system(base_system, snapshot; branch, q_flux, tc_flux)
+    model = build_model(system; hamiltonian_spec = local_spec(; charge_cutoff))
+    ψ0 = diabatic_state(snapshot, q_flux, tc_flux, init_levels...; branch, charge_cutoff, qb_ncut, tc_ncut, resonator_dim)
+    result = evolve(model, ψ0, times)
+    pe_projector = local_projector_qlevel(snapshot, q_flux, tc_flux, 1; branch, charge_cutoff, qb_ncut, tc_ncut, resonator_dim)
+    pf_projector = local_projector_qlevel(snapshot, q_flux, tc_flux, 2; branch, charge_cutoff, qb_ncut, tc_ncut, resonator_dim)
+    p_e = Float64[real(dag(ψ) * pe_projector * ψ) for ψ in result.states]
+    p_f = Float64[real(dag(ψ) * pf_projector * ψ) for ψ in result.states]
+    return (
+        times = times,
+        p_e = p_e,
+        p_f = p_f,
+        q_flux = q_flux,
+        tc_flux = tc_flux,
+        q_ghz = qubit_frequency(snapshot, q_flux; branch, charge_cutoff, qb_ncut),
+        tc_ghz = coupler_frequency(snapshot, tc_flux; branch, charge_cutoff, tc_ncut),
+    )
+end
+
+function move_pixel_metric(trace; t_min_ns = 0.0)
+    valid = findall(t -> t >= t_min_ns, trace.times)
+    isempty(valid) && (valid = eachindex(trace.times))
+    valid = collect(valid)
+    local_index = argmin(trace.p_e[valid])
+    best_index = valid[local_index]
+    min_p_e = trace.p_e[best_index]
+    return (
+        value = min_p_e,
+        best_time_ns = trace.times[best_index],
+        aux = min_p_e,
+        min_p_e = min_p_e,
+        best_index = best_index,
+    )
+end
+
+function cz_pixel_metric(trace; t_min_ns = 10.0, f_threshold = 0.15)
+    peak_f = accumulate(max, trace.p_f)
+    return_score = trace.p_e .* peak_f
+    valid = findall(i -> trace.times[i] >= t_min_ns && peak_f[i] >= f_threshold, eachindex(trace.times))
+    if isempty(valid)
+        valid = findall(t -> t >= t_min_ns, trace.times)
+    end
+    isempty(valid) && (valid = eachindex(trace.times))
+    valid = collect(valid)
+    local_index = argmax(return_score[valid])
+    best_index = valid[local_index]
+    peak_f_best = peak_f[best_index]
+    return (
+        value = 1 - return_score[best_index],
+        best_time_ns = trace.times[best_index],
+        aux = peak_f_best,
+        peak_f = peak_f_best,
+        return_score = return_score[best_index],
+        best_index = best_index,
+    )
+end
+
 function qubit_excited_scan(base_system, snapshot, q_fluxes, tc_fluxes, init_levels, t_gate; branch = :move, charge_cutoff, qb_ncut = 5, tc_ncut = 4, resonator_dim = 3)
     x_values = [qubit_frequency(snapshot, q_flux; branch, charge_cutoff, qb_ncut) for q_flux in q_fluxes]
     y_values = [coupler_frequency(snapshot, tc_flux; branch, charge_cutoff, tc_ncut) for tc_flux in tc_fluxes]
     matrix = zeros(length(tc_fluxes), length(q_fluxes))
     spec = local_spec(; charge_cutoff)
 
-    for (j, tc_flux) in enumerate(tc_fluxes), (i, q_flux) in enumerate(q_fluxes)
-        system = retuned_system(base_system, snapshot; branch, q_flux, tc_flux)
-        model = build_model(system; hamiltonian_spec = spec)
-        ψ0 = diabatic_state(snapshot, q_flux, tc_flux, init_levels...; branch, charge_cutoff, qb_ncut, tc_ncut, resonator_dim)
-        result = evolve(model, ψ0, [0.0, t_gate])
-        ψf = result.states[end]
-        Pq = local_projector_qlevel(snapshot, q_flux, tc_flux, 1; branch, charge_cutoff, qb_ncut, tc_ncut, resonator_dim)
-        matrix[j, i] = real(dag(ψf) * Pq * ψf)
+    Threads.@threads for j in eachindex(tc_fluxes)
+        tc_flux = tc_fluxes[j]
+        for i in eachindex(q_fluxes)
+            q_flux = q_fluxes[i]
+            system = retuned_system(base_system, snapshot; branch, q_flux, tc_flux)
+            model = build_model(system; hamiltonian_spec = spec)
+            ψ0 = diabatic_state(snapshot, q_flux, tc_flux, init_levels...; branch, charge_cutoff, qb_ncut, tc_ncut, resonator_dim)
+            result = evolve(model, ψ0, [0.0, t_gate])
+            ψf = result.states[end]
+            Pq = local_projector_qlevel(snapshot, q_flux, tc_flux, 1; branch, charge_cutoff, qb_ncut, tc_ncut, resonator_dim)
+            matrix[j, i] = real(dag(ψf) * Pq * ψf)
+        end
     end
 
     return x_values, y_values, matrix
@@ -455,6 +719,27 @@ function ordered_heatmap_axes(x_values, y_values, matrix)
     y_order = sortperm(y_values)
     return x_values[x_order], y_values[y_order], matrix[y_order, x_order]
 end
+
+function best_metric_scan_point(snapshot, q_fluxes, tc_fluxes, matrix, time_matrix, aux_matrix; branch = :move, objective = :min, charge_cutoff, qb_ncut = 5, tc_ncut = 4)
+    linear_index = objective == :max ? argmax(matrix) : argmin(matrix)
+    index = CartesianIndices(matrix)[linear_index]
+    row, col = Tuple(index)
+    q_flux = q_fluxes[col]
+    tc_flux = tc_fluxes[row]
+    return (
+        q_flux = q_flux,
+        tc_flux = tc_flux,
+        q_ghz = qubit_frequency(snapshot, q_flux; branch, charge_cutoff, qb_ncut),
+        tc_ghz = coupler_frequency(snapshot, tc_flux; branch, charge_cutoff, tc_ncut),
+        value = matrix[row, col],
+        best_time_ns = time_matrix[row, col],
+        aux = aux_matrix[row, col],
+        q_edge = col == 1 ? :low : (col == length(q_fluxes) ? :high : :interior),
+        tc_edge = row == 1 ? :low : (row == length(tc_fluxes) ? :high : :interior),
+    )
+end
+
+best_oscillation_scan_point(args...; kwargs...) = best_metric_scan_point(args...; kwargs...)
 
 function best_scan_point(snapshot, q_fluxes, tc_fluxes, matrix; branch = :move, objective = :min, charge_cutoff, qb_ncut = 5, tc_ncut = 4)
     linear_index = objective == :max ? argmax(matrix) : argmin(matrix)
@@ -522,6 +807,251 @@ function adaptive_qubit_excited_scan(base_system, snapshot, q_fluxes, tc_fluxes,
     return result
 end
 
+function pulse_population_scan(
+    base_system,
+    snapshot,
+    q_fluxes,
+    tc_fluxes,
+    init_levels,
+    hold_ns;
+    branch = :move,
+    metric = :move,
+    objective = :max,
+    ramp_ns,
+    charge_cutoff,
+    qb_ncut = 5,
+    tc_ncut = 4,
+    resonator_dim = 3,
+)
+    context = parked_branch_context(
+        base_system,
+        snapshot,
+        init_levels;
+        branch,
+        charge_cutoff,
+        qb_ncut,
+        tc_ncut,
+        resonator_dim,
+    )
+    x_values = [qubit_frequency(snapshot, q_flux; branch, charge_cutoff, qb_ncut) for q_flux in q_fluxes]
+    y_values = [coupler_frequency(snapshot, tc_flux; branch, charge_cutoff, tc_ncut) for tc_flux in tc_fluxes]
+    matrix = zeros(length(tc_fluxes), length(q_fluxes))
+    time_matrix = zeros(length(tc_fluxes), length(q_fluxes))
+    aux_matrix = zeros(length(tc_fluxes), length(q_fluxes))
+
+    Threads.@threads for j in eachindex(tc_fluxes)
+        tc_flux = tc_fluxes[j]
+        for i in eachindex(q_fluxes)
+            q_flux = q_fluxes[i]
+            trace = pulse_population_trace(context, snapshot, q_flux, tc_flux, hold_ns; ramp_ns, branch)
+            pixel = pulse_population_metric(trace; metric)
+            matrix[j, i] = pixel.value
+            time_matrix[j, i] = pixel.best_time_ns
+            aux_matrix[j, i] = pixel.aux
+        end
+    end
+
+    return x_values, y_values, matrix, time_matrix, aux_matrix
+end
+
+function adaptive_pulse_population_scan(
+    base_system,
+    snapshot,
+    q_fluxes,
+    tc_fluxes,
+    init_levels,
+    hold_ns;
+    branch = :move,
+    metric = :move,
+    objective = :max,
+    ramp_ns,
+    charge_cutoff,
+    max_rounds = 4,
+    qb_ncut = 5,
+    tc_ncut = 4,
+    resonator_dim = 3,
+)
+    current_q_fluxes = q_fluxes
+    current_tc_fluxes = tc_fluxes
+    result = nothing
+
+    for round in 1:max_rounds
+        x_values, y_values, matrix, time_matrix, aux_matrix = pulse_population_scan(
+            base_system,
+            snapshot,
+            current_q_fluxes,
+            current_tc_fluxes,
+            init_levels,
+            hold_ns;
+            branch,
+            metric,
+            objective,
+            ramp_ns,
+            charge_cutoff,
+            qb_ncut,
+            tc_ncut,
+            resonator_dim,
+        )
+        best_point = best_metric_scan_point(
+            snapshot,
+            current_q_fluxes,
+            current_tc_fluxes,
+            matrix,
+            time_matrix,
+            aux_matrix;
+            branch,
+            objective,
+            charge_cutoff,
+            qb_ncut,
+            tc_ncut,
+        )
+        result = (
+            q_fluxes = current_q_fluxes,
+            tc_fluxes = current_tc_fluxes,
+            x_values = x_values,
+            y_values = y_values,
+            matrix = matrix,
+            time_matrix = time_matrix,
+            aux_matrix = aux_matrix,
+            best_point = best_point,
+            rounds = round,
+            hold_ns = hold_ns,
+            ramp_ns = ramp_ns,
+        )
+        (best_point.q_edge == :interior && best_point.tc_edge == :interior) && return result
+        round == max_rounds && return result
+        current_q_fluxes = shift_flux_range(current_q_fluxes, best_point.q_edge)
+        current_tc_fluxes = shift_flux_range(current_tc_fluxes, best_point.tc_edge)
+    end
+
+    return result
+end
+
+function oscillation_metric_scan(
+    base_system,
+    snapshot,
+    q_fluxes,
+    tc_fluxes,
+    init_levels,
+    tlist;
+    branch = :move,
+    metric = :move,
+    objective = :min,
+    charge_cutoff,
+    qb_ncut = 5,
+    tc_ncut = 4,
+    resonator_dim = 3,
+    t_min_ns = 0.0,
+    f_threshold = 0.15,
+)
+    x_values = [qubit_frequency(snapshot, q_flux; branch, charge_cutoff, qb_ncut) for q_flux in q_fluxes]
+    y_values = [coupler_frequency(snapshot, tc_flux; branch, charge_cutoff, tc_ncut) for tc_flux in tc_fluxes]
+    matrix = zeros(length(tc_fluxes), length(q_fluxes))
+    time_matrix = zeros(length(tc_fluxes), length(q_fluxes))
+    aux_matrix = zeros(length(tc_fluxes), length(q_fluxes))
+
+    Threads.@threads for j in eachindex(tc_fluxes)
+        tc_flux = tc_fluxes[j]
+        for i in eachindex(q_fluxes)
+            q_flux = q_fluxes[i]
+            trace = qubit_population_trace(
+                base_system,
+                snapshot,
+                q_flux,
+                tc_flux,
+                init_levels,
+                tlist;
+                branch,
+                charge_cutoff,
+                qb_ncut,
+                tc_ncut,
+                resonator_dim,
+            )
+            pixel = metric == :cz ?
+                cz_pixel_metric(trace; t_min_ns, f_threshold) :
+                move_pixel_metric(trace; t_min_ns)
+            matrix[j, i] = pixel.value
+            time_matrix[j, i] = pixel.best_time_ns
+            aux_matrix[j, i] = pixel.aux
+        end
+    end
+
+    return x_values, y_values, matrix, time_matrix, aux_matrix
+end
+
+function adaptive_oscillation_metric_scan(
+    base_system,
+    snapshot,
+    q_fluxes,
+    tc_fluxes,
+    init_levels,
+    tlist;
+    branch = :move,
+    metric = :move,
+    objective = :min,
+    charge_cutoff,
+    max_rounds = 4,
+    qb_ncut = 5,
+    tc_ncut = 4,
+    resonator_dim = 3,
+    t_min_ns = 0.0,
+    f_threshold = 0.15,
+)
+    current_q_fluxes = q_fluxes
+    current_tc_fluxes = tc_fluxes
+    result = nothing
+
+    for round in 1:max_rounds
+        x_values, y_values, matrix, time_matrix, aux_matrix = oscillation_metric_scan(
+            base_system,
+            snapshot,
+            current_q_fluxes,
+            current_tc_fluxes,
+            init_levels,
+            tlist;
+            branch,
+            metric,
+            objective,
+            charge_cutoff,
+            qb_ncut,
+            tc_ncut,
+            resonator_dim,
+            t_min_ns,
+            f_threshold,
+        )
+        best_point = best_oscillation_scan_point(
+            snapshot,
+            current_q_fluxes,
+            current_tc_fluxes,
+            matrix,
+            time_matrix,
+            aux_matrix;
+            branch,
+            objective,
+            charge_cutoff,
+            qb_ncut,
+            tc_ncut,
+        )
+        result = (
+            q_fluxes = current_q_fluxes,
+            tc_fluxes = current_tc_fluxes,
+            x_values = x_values,
+            y_values = y_values,
+            matrix = matrix,
+            time_matrix = time_matrix,
+            aux_matrix = aux_matrix,
+            best_point = best_point,
+            rounds = round,
+        )
+        (best_point.q_edge == :interior && best_point.tc_edge == :interior) && return result
+        round == max_rounds && return result
+        current_q_fluxes = shift_flux_range(current_q_fluxes, best_point.q_edge)
+        current_tc_fluxes = shift_flux_range(current_tc_fluxes, best_point.tc_edge)
+    end
+
+    return result
+end
+
 function quench_qubit_excited_population(base_system, snapshot, q_flux, tc_flux, init_levels, t_gate; branch = :move, charge_cutoff, qb_ncut = 5, tc_ncut = 4, resonator_dim = 3)
     system = retuned_system(base_system, snapshot; branch, q_flux, tc_flux)
     model = build_model(system; hamiltonian_spec = local_spec(; charge_cutoff))
@@ -533,6 +1063,49 @@ function quench_qubit_excited_population(base_system, snapshot, q_flux, tc_flux,
 end
 
 final_qubit_excited_population(args...; kwargs...) = quench_qubit_excited_population(args...; kwargs...)
+
+function final_pulse_state_probabilities(
+    base_system,
+    snapshot,
+    q_flux,
+    tc_flux,
+    init_levels,
+    hold_ns;
+    branch = :move,
+    ramp_ns,
+    charge_cutoff,
+    qb_ncut = 5,
+    tc_ncut = 4,
+    resonator_dim = 3,
+)
+    trace = pulse_population_trace(
+        base_system,
+        snapshot,
+        q_flux,
+        tc_flux,
+        init_levels,
+        hold_ns;
+        branch,
+        ramp_ns,
+        charge_cutoff,
+        qb_ncut,
+        tc_ncut,
+        resonator_dim,
+    )
+    return (
+        q_flux = q_flux,
+        tc_flux = tc_flux,
+        q_ghz = trace.q_ghz,
+        tc_ghz = trace.tc_ghz,
+        final_time_ns = trace.final_time_ns,
+        final_p_g = trace.final_p_g,
+        final_p_e = trace.final_p_e,
+        final_p_f = trace.final_p_f,
+        final_p_cr1 = trace.final_p_cr1,
+        transfer_score = trace.transfer_score,
+        leakage_proxy = trace.final_leakage_proxy,
+    )
+end
 
 function computational_phase_summary(base_system, snapshot, q_flux, tc_flux, t_gate; branch = :cz, charge_cutoff)
     system = retuned_system(base_system, snapshot; branch, q_flux, tc_flux)
@@ -553,10 +1126,393 @@ function computational_phase_summary(base_system, snapshot, q_flux, tc_flux, t_g
     )
 end
 
+function pulse_computational_phase_summary(
+    base_system,
+    snapshot,
+    q_flux,
+    tc_flux,
+    hold_ns;
+    branch = :cz,
+    ramp_ns,
+    charge_cutoff,
+)
+    spec = subspace_spec(
+        base_system;
+        hamiltonian_spec = local_spec(; charge_cutoff),
+        subsystem_levels = (QB = [0, 1], CR = [0, 1]),
+        basis = :dressed_static,
+    )
+    params = (
+        q_delta = q_flux - branch_q_park_flux(snapshot, branch),
+        tc_delta = tc_flux - branch_tc_park_flux(snapshot, branch),
+        ramp_ns = ramp_ns,
+        hold_ns = hold_ns,
+    )
+    flux_controls = [
+        FluxControl(Symbol(branch, :_q_phase_flux), :QB, (p, t) -> ramp_hold_ramp_flux(t, p.q_delta, p.ramp_ns, p.hold_ns)),
+        FluxControl(Symbol(branch, :_tc_phase_flux), :TC, (p, t) -> ramp_hold_ramp_flux(t, p.tc_delta, p.ramp_ns, p.hold_ns)),
+    ]
+    total_time = pulse_total_time_ns(hold_ns, ramp_ns)
+    trace = projected_unitary(
+        base_system,
+        spec,
+        [0.0, total_time];
+        hamiltonian_spec = local_spec(; charge_cutoff),
+        flux_controls = flux_controls,
+        params = params,
+    )
+    return (
+        q_flux = q_flux,
+        tc_flux = tc_flux,
+        q_ghz = qubit_frequency(snapshot, q_flux; branch, charge_cutoff),
+        tc_ghz = coupler_frequency(snapshot, tc_flux; branch, charge_cutoff),
+        final_time_ns = total_time,
+        conditional_phase_pi = conditional_phase(trace.unitaries[end]) / pi,
+        max_leakage = maximum(trace.leakages),
+    )
+end
+
 function centered_span_window(best_point, x_values, y_values; delta_q_ghz, delta_tc_ghz)
     xlo = maximum((minimum(x_values), best_point.q_ghz - delta_q_ghz / 2))
     xhi = minimum((maximum(x_values), best_point.q_ghz + delta_q_ghz / 2))
     ylo = maximum((minimum(y_values), best_point.tc_ghz - delta_tc_ghz / 2))
     yhi = minimum((maximum(y_values), best_point.tc_ghz + delta_tc_ghz / 2))
     return (xlims = (xlo, xhi), ylims = (ylo, yhi))
+end
+
+function inverse_monotone_interp(sorted_freqs, sorted_fluxes, target_freq)
+    target_freq <= first(sorted_freqs) && return first(sorted_fluxes)
+    target_freq >= last(sorted_freqs) && return last(sorted_fluxes)
+    upper_idx = searchsortedfirst(sorted_freqs, target_freq)
+    lower_idx = max(upper_idx - 1, 1)
+    x0 = sorted_freqs[lower_idx]
+    x1 = sorted_freqs[upper_idx]
+    y0 = sorted_fluxes[lower_idx]
+    y1 = sorted_fluxes[upper_idx]
+    isapprox(x0, x1; atol = 1e-12) && return (y0 + y1) / 2
+    return y0 + (target_freq - x0) * (y1 - y0) / (x1 - x0)
+end
+
+function dense_frequency_window_axis(flux_values, freq_values, center_freq, delta_freq; points)
+    requested = (center_freq - delta_freq / 2, center_freq + delta_freq / 2)
+    clamped = (
+        max(minimum(freq_values), requested[1]),
+        min(maximum(freq_values), requested[2]),
+    )
+
+    order = sortperm(freq_values)
+    sorted_freqs = collect(freq_values[order])
+    sorted_fluxes = collect(flux_values[order])
+    flux_lo = inverse_monotone_interp(sorted_freqs, sorted_fluxes, clamped[1])
+    flux_hi = inverse_monotone_interp(sorted_freqs, sorted_fluxes, clamped[2])
+
+    return (
+        flux_values = collect(range(flux_lo, flux_hi; length = points)),
+        requested_window = requested,
+        clamped_window = clamped,
+    )
+end
+
+function dense_best_centered_qubit_excited_scan(
+    base_system,
+    snapshot,
+    coarse_scan,
+    init_levels,
+    t_gate;
+    branch = :move,
+    objective = :min,
+    charge_cutoff,
+    q_span_ghz,
+    tc_span_ghz,
+    q_points,
+    tc_points,
+    qb_ncut = 5,
+    tc_ncut = 4,
+    resonator_dim = 3,
+)
+    coarse_best = coarse_scan.best_point
+    q_axis = dense_frequency_window_axis(
+        coarse_scan.q_fluxes,
+        coarse_scan.x_values,
+        coarse_best.q_ghz,
+        q_span_ghz;
+        points = q_points,
+    )
+    tc_axis = dense_frequency_window_axis(
+        coarse_scan.tc_fluxes,
+        coarse_scan.y_values,
+        coarse_best.tc_ghz,
+        tc_span_ghz;
+        points = tc_points,
+    )
+
+    x_values, y_values, matrix = qubit_excited_scan(
+        base_system,
+        snapshot,
+        q_axis.flux_values,
+        tc_axis.flux_values,
+        init_levels,
+        t_gate;
+        branch,
+        charge_cutoff,
+        qb_ncut,
+        tc_ncut,
+        resonator_dim,
+    )
+    x_sorted, y_sorted, matrix_sorted = ordered_heatmap_axes(x_values, y_values, matrix)
+    best_point = best_scan_point(
+        snapshot,
+        q_axis.flux_values,
+        tc_axis.flux_values,
+        matrix;
+        branch,
+        objective,
+        charge_cutoff,
+        qb_ncut,
+        tc_ncut,
+    )
+    display = (
+        xlims = (
+            max(minimum(x_sorted), q_axis.clamped_window[1]),
+            min(maximum(x_sorted), q_axis.clamped_window[2]),
+        ),
+        ylims = (
+            max(minimum(y_sorted), tc_axis.clamped_window[1]),
+            min(maximum(y_sorted), tc_axis.clamped_window[2]),
+        ),
+    )
+
+    return (
+        coarse_best_point = coarse_best,
+        best_point = best_point,
+        q_fluxes = q_axis.flux_values,
+        tc_fluxes = tc_axis.flux_values,
+        x_values = x_values,
+        y_values = y_values,
+        matrix = matrix,
+        x_sorted = x_sorted,
+        y_sorted = y_sorted,
+        matrix_sorted = matrix_sorted,
+        requested_window = (x = q_axis.requested_window, y = tc_axis.requested_window),
+        clamped_window = (x = q_axis.clamped_window, y = tc_axis.clamped_window),
+        requested_span_ghz = (q = q_span_ghz, tc = tc_span_ghz),
+        realized_span_ghz = (
+            q = display.xlims[2] - display.xlims[1],
+            tc = display.ylims[2] - display.ylims[1],
+        ),
+        display = display,
+        grid_size = (q_points = q_points, tc_points = tc_points),
+    )
+end
+
+function dense_best_centered_oscillation_scan(
+    base_system,
+    snapshot,
+    coarse_scan,
+    init_levels,
+    tlist;
+    branch = :move,
+    metric = :move,
+    objective = :min,
+    charge_cutoff,
+    q_span_ghz,
+    tc_span_ghz,
+    q_points,
+    tc_points,
+    qb_ncut = 5,
+    tc_ncut = 4,
+    resonator_dim = 3,
+    t_min_ns = 0.0,
+    f_threshold = 0.15,
+)
+    coarse_best = coarse_scan.best_point
+    q_axis = dense_frequency_window_axis(
+        coarse_scan.q_fluxes,
+        coarse_scan.x_values,
+        coarse_best.q_ghz,
+        q_span_ghz;
+        points = q_points,
+    )
+    tc_axis = dense_frequency_window_axis(
+        coarse_scan.tc_fluxes,
+        coarse_scan.y_values,
+        coarse_best.tc_ghz,
+        tc_span_ghz;
+        points = tc_points,
+    )
+
+    x_values, y_values, matrix, time_matrix, aux_matrix = oscillation_metric_scan(
+        base_system,
+        snapshot,
+        q_axis.flux_values,
+        tc_axis.flux_values,
+        init_levels,
+        tlist;
+        branch,
+        metric,
+        objective,
+        charge_cutoff,
+        qb_ncut,
+        tc_ncut,
+        resonator_dim,
+        t_min_ns,
+        f_threshold,
+    )
+    x_sorted, y_sorted, matrix_sorted = ordered_heatmap_axes(x_values, y_values, matrix)
+    time_sorted = time_matrix[sortperm(y_values), sortperm(x_values)]
+    aux_sorted = aux_matrix[sortperm(y_values), sortperm(x_values)]
+    best_point = best_oscillation_scan_point(
+        snapshot,
+        q_axis.flux_values,
+        tc_axis.flux_values,
+        matrix,
+        time_matrix,
+        aux_matrix;
+        branch,
+        objective,
+        charge_cutoff,
+        qb_ncut,
+        tc_ncut,
+    )
+    display = (
+        xlims = (
+            max(minimum(x_sorted), q_axis.clamped_window[1]),
+            min(maximum(x_sorted), q_axis.clamped_window[2]),
+        ),
+        ylims = (
+            max(minimum(y_sorted), tc_axis.clamped_window[1]),
+            min(maximum(y_sorted), tc_axis.clamped_window[2]),
+        ),
+    )
+
+    return (
+        coarse_best_point = coarse_best,
+        best_point = best_point,
+        q_fluxes = q_axis.flux_values,
+        tc_fluxes = tc_axis.flux_values,
+        x_values = x_values,
+        y_values = y_values,
+        matrix = matrix,
+        time_matrix = time_matrix,
+        aux_matrix = aux_matrix,
+        x_sorted = x_sorted,
+        y_sorted = y_sorted,
+        matrix_sorted = matrix_sorted,
+        time_sorted = time_sorted,
+        aux_sorted = aux_sorted,
+        requested_window = (x = q_axis.requested_window, y = tc_axis.requested_window),
+        clamped_window = (x = q_axis.clamped_window, y = tc_axis.clamped_window),
+        requested_span_ghz = (q = q_span_ghz, tc = tc_span_ghz),
+        realized_span_ghz = (
+            q = display.xlims[2] - display.xlims[1],
+            tc = display.ylims[2] - display.ylims[1],
+        ),
+        display = display,
+        grid_size = (q_points = q_points, tc_points = tc_points),
+    )
+end
+
+function dense_best_centered_pulse_population_scan(
+    base_system,
+    snapshot,
+    coarse_scan,
+    init_levels,
+    hold_ns;
+    branch = :move,
+    metric = :move,
+    objective = :max,
+    ramp_ns,
+    charge_cutoff,
+    q_span_ghz,
+    tc_span_ghz,
+    q_points,
+    tc_points,
+    qb_ncut = 5,
+    tc_ncut = 4,
+    resonator_dim = 3,
+)
+    coarse_best = coarse_scan.best_point
+    q_axis = dense_frequency_window_axis(
+        coarse_scan.q_fluxes,
+        coarse_scan.x_values,
+        coarse_best.q_ghz,
+        q_span_ghz;
+        points = q_points,
+    )
+    tc_axis = dense_frequency_window_axis(
+        coarse_scan.tc_fluxes,
+        coarse_scan.y_values,
+        coarse_best.tc_ghz,
+        tc_span_ghz;
+        points = tc_points,
+    )
+
+    x_values, y_values, matrix, time_matrix, aux_matrix = pulse_population_scan(
+        base_system,
+        snapshot,
+        q_axis.flux_values,
+        tc_axis.flux_values,
+        init_levels,
+        hold_ns;
+        branch,
+        metric,
+        objective,
+        ramp_ns,
+        charge_cutoff,
+        qb_ncut,
+        tc_ncut,
+        resonator_dim,
+    )
+    x_sorted, y_sorted, matrix_sorted = ordered_heatmap_axes(x_values, y_values, matrix)
+    time_sorted = time_matrix[sortperm(y_values), sortperm(x_values)]
+    aux_sorted = aux_matrix[sortperm(y_values), sortperm(x_values)]
+    best_point = best_metric_scan_point(
+        snapshot,
+        q_axis.flux_values,
+        tc_axis.flux_values,
+        matrix,
+        time_matrix,
+        aux_matrix;
+        branch,
+        objective,
+        charge_cutoff,
+        qb_ncut,
+        tc_ncut,
+    )
+    display = (
+        xlims = (
+            max(minimum(x_sorted), q_axis.clamped_window[1]),
+            min(maximum(x_sorted), q_axis.clamped_window[2]),
+        ),
+        ylims = (
+            max(minimum(y_sorted), tc_axis.clamped_window[1]),
+            min(maximum(y_sorted), tc_axis.clamped_window[2]),
+        ),
+    )
+
+    return (
+        coarse_best_point = coarse_best,
+        best_point = best_point,
+        q_fluxes = q_axis.flux_values,
+        tc_fluxes = tc_axis.flux_values,
+        x_values = x_values,
+        y_values = y_values,
+        matrix = matrix,
+        time_matrix = time_matrix,
+        aux_matrix = aux_matrix,
+        x_sorted = x_sorted,
+        y_sorted = y_sorted,
+        matrix_sorted = matrix_sorted,
+        time_sorted = time_sorted,
+        aux_sorted = aux_sorted,
+        requested_window = (x = q_axis.requested_window, y = tc_axis.requested_window),
+        clamped_window = (x = q_axis.clamped_window, y = tc_axis.clamped_window),
+        requested_span_ghz = (q = q_span_ghz, tc = tc_span_ghz),
+        realized_span_ghz = (
+            q = display.xlims[2] - display.xlims[1],
+            tc = display.ylims[2] - display.ylims[1],
+        ),
+        display = display,
+        grid_size = (q_points = q_points, tc_points = tc_points),
+    )
 end

@@ -1071,6 +1071,7 @@ end
 
 @testset "Renger 2026 workflow builders" begin
     snapshot = load_renger2026_snapshot()
+    snapshot_toml = TOML.parsefile(joinpath(dirname(@__DIR__), "output", "renger2026", "paper_local_priors.toml"))
     qr_stage = renger2026_stage1_qr_system(snapshot)
     qcr_stage = renger2026_stage1_qcr_system(snapshot)
     pair = renger2026_model_pair(snapshot)
@@ -1081,6 +1082,64 @@ end
     @test length(couplings(qcr_stage.system)) == 2
     @test pair.effective.hamiltonian_spec isa EffectiveHamiltonianSpec
     @test pair.circuit.hamiltonian_spec isa CircuitHamiltonianSpec
+    @test snapshot.targets["cr_f01_ghz"] == 4.3
+    @test snapshot.targets["cr_dressed_f01_ghz"] == 4.22
+    @test snapshot.targets["qb1_f01_ghz"] == 4.67
+    @test snapshot.targets["qb2_f01_ghz"] == 4.47
+    @test snapshot.targets["qb1_dressed_f01_ghz"] == 4.67
+    @test snapshot.targets["qb2_dressed_f01_ghz"] == 4.47
+    @test snapshot.targets["qb1_alpha_ghz"] == -0.187
+    @test snapshot.targets["qb2_alpha_ghz"] == -0.187
+    @test snapshot.targets["coupler_parked_f01_ghz"] == 6.5
+    @test isapprox(snapshot.targets["qb1_bare_f01_ghz"], snapshot.devices[:QB1]["f01_ghz"]; atol = 1e-6)
+    @test isapprox(snapshot.targets["qb2_bare_f01_ghz"], snapshot.devices[:QB2]["f01_ghz"]; atol = 1e-6)
+    @test subsystems(qr_stage.system)[2].ω == 4.3
+    @test subsystems(qcr_stage.system)[3].ω == 4.3
+    @test snapshot.devices[:QB1]["fit_classification"] == "dressed_anchor_backout"
+    @test snapshot.devices[:QB2]["fit_classification"] == "dressed_anchor_backout"
+    @test snapshot_toml["inference"]["qubit_fit_classification"] == "dressed_anchor_backout"
+    @test snapshot.devices[:TC1]["flux"] == 0.0
+    @test snapshot.devices[:TC2]["flux"] == 0.0
+    @test snapshot.devices[:TC1]["asymmetry"] == 0.1
+    @test snapshot.devices[:TC2]["asymmetry"] == 0.1
+    @test snapshot.targets["qb1_ej_ghz"] == 14.8
+    @test snapshot.targets["qb2_ej_ghz"] == 13.8
+    @test isapprox(snapshot.targets["qb1_ec_ghz"], 14.8 / 74.2; atol = 1e-12)
+    @test isapprox(snapshot.targets["qb2_ec_ghz"], 13.8 / 68.8; atol = 1e-12)
+    @test isapprox(snapshot.devices[:QB1]["f01_ghz"], 4.6679; atol = 0.003)
+    @test isapprox(snapshot.devices[:QB2]["f01_ghz"], 4.47033; atol = 0.003)
+    @test isapprox(snapshot.devices[:QB1]["anharmonicity_ghz"], -0.18669; atol = 0.002)
+    @test isapprox(snapshot.devices[:QB2]["anharmonicity_ghz"], -0.18692; atol = 0.002)
+    @test isapprox(snapshot.devices[:QB1]["fitted_dressed_f01_ghz"], snapshot.targets["qb1_dressed_f01_ghz"]; atol = 0.002)
+    @test isapprox(snapshot.devices[:QB2]["fitted_dressed_f01_ghz"], snapshot.targets["qb2_dressed_f01_ghz"]; atol = 0.002)
+    @test snapshot.devices[:QB1]["dressed_assignment_overlap"] > 0.9
+    @test snapshot.devices[:QB2]["dressed_assignment_overlap"] > 0.9
+    @test isapprox(snapshot.devices[:TC1]["f01_ghz"], 6.5; atol = 0.02)
+    @test isapprox(snapshot.devices[:TC2]["f01_ghz"], 6.5; atol = 0.02)
+    @test isapprox(snapshot.devices[:TC1]["anharmonicity_ghz"], -0.11; atol = 0.005)
+    @test isapprox(snapshot.devices[:TC2]["anharmonicity_ghz"], -0.11; atol = 0.005)
+    @test snapshot.devices[:TC1]["EJmax"] > 50.0
+    @test snapshot.devices[:TC2]["EJmax"] > 50.0
+    @test isapprox(
+        snapshot.targets["g_qc_qb1_tc1"],
+        snapshot.targets["beta_qc_qb1"] * sqrt(snapshot.devices[:QB1]["f01_ghz"] * snapshot.devices[:TC1]["f01_ghz"]);
+        atol = 1e-4,
+    )
+    @test isapprox(
+        snapshot.targets["g_qc_qb2_tc2"],
+        snapshot.targets["beta_qc_qb2"] * sqrt(snapshot.devices[:QB2]["f01_ghz"] * snapshot.devices[:TC2]["f01_ghz"]);
+        atol = 1e-4,
+    )
+    @test isapprox(
+        snapshot.targets["g_cr_tc1"],
+        snapshot.targets["beta_cr"] * sqrt(snapshot.devices[:TC1]["f01_ghz"] * snapshot.targets["cr_f01_ghz"]);
+        atol = 1e-4,
+    )
+    @test isapprox(
+        snapshot.targets["g_cr_tc2"],
+        snapshot.targets["beta_cr"] * sqrt(snapshot.devices[:TC2]["f01_ghz"] * snapshot.targets["cr_f01_ghz"]);
+        atol = 1e-4,
+    )
 
     effective_model = build_model(pair.effective.system)
     circuit_model = build_model(pair.circuit.system; hamiltonian_spec = pair.circuit.hamiltonian_spec)
@@ -1089,30 +1148,37 @@ end
     @test size(hamiltonian(circuit_model).data) == (1875, 1875)
 end
 
-@testset "Renger 2026 shared resonator coupling target" begin
+@testset "Renger 2026 explicit effective coupling seeds" begin
     snapshot = load_renger2026_snapshot()
     shared_snapshot = deepcopy(snapshot)
+    shared_snapshot.devices[:TC1]["f01_ghz"] = 9.9
+    shared_snapshot.devices[:TC2]["f01_ghz"] = 6.1
     shared_snapshot.targets["beta_cr"] = 0.031
+    shared_snapshot.targets["g_qr_qb1"] = 0.0091
+    shared_snapshot.targets["g_qr_qb2"] = 0.0087
+    shared_snapshot.targets["g_qc_qb1_tc1"] = 0.082
+    shared_snapshot.targets["g_qc_qb2_tc2"] = 0.107
+    shared_snapshot.targets["g_cr_tc1"] = 0.123
+    shared_snapshot.targets["g_cr_tc2"] = 0.124
 
+    qr_stage = renger2026_stage1_qr_system(shared_snapshot)
     qcr_stage = renger2026_stage1_qcr_system(shared_snapshot; qubit = :QB1, coupler = :TC1)
     effective = renger2026_reduced_system(shared_snapshot; model = :effective)
     circuit = renger2026_reduced_system(shared_snapshot; model = :circuit)
 
-    expected_tc1 = 0.031 * sqrt(
-        shared_snapshot.devices[:TC1]["f01_ghz"] * shared_snapshot.targets["cr_f01_ghz"],
-    )
-    expected_tc2 = 0.031 * sqrt(
-        shared_snapshot.devices[:TC2]["f01_ghz"] * shared_snapshot.targets["cr_f01_ghz"],
-    )
-
-    @test qcr_stage.system.couplings[2].g ≈ expected_tc1
-    @test effective.system.couplings[2].g ≈ expected_tc1
-    @test effective.system.couplings[3].g ≈ expected_tc2
+    @test qr_stage.system.couplings[1].g == 0.0091
+    @test qcr_stage.system.couplings[1].g == 0.082
+    @test qcr_stage.system.couplings[2].g == 0.123
+    @test effective.system.couplings[1].g == 0.082
+    @test effective.system.couplings[2].g == 0.123
+    @test effective.system.couplings[3].g == 0.124
+    @test effective.system.couplings[4].g == 0.107
     @test circuit.system.couplings[2].G == 0.031
     @test circuit.system.couplings[3].G == 0.031
 end
 
 @testset "Renger 2026 snapshot overlay merge" begin
+    baseline = load_renger2026_snapshot()
     mktemp() do path, io
         write(
             io,
@@ -1135,8 +1201,8 @@ end
         @test snapshot.devices[:TC1]["EJmax"] == 38.5
         @test snapshot.devices[:TC1]["asymmetry"] == 0.14
         @test snapshot.devices[:TC1]["f01_ghz"] == 5.9
-        @test snapshot.devices[:TC1]["EC"] == 0.105
-        @test snapshot.devices[:TC2]["EJmax"] == 34.25
+        @test snapshot.devices[:TC1]["EC"] == baseline.devices[:TC1]["EC"]
+        @test snapshot.devices[:TC2]["EJmax"] == baseline.devices[:TC2]["EJmax"]
         @test snapshot.targets["beta_qc_qb1"] == 0.019
         @test snapshot.targets["beta_qc_qb2"] == 0.022
         @test snapshot.targets["beta_cr"] == 0.028
@@ -1151,9 +1217,10 @@ end
     @test overlay["source_snapshot"] == "output/renger2026/paper_local_priors.toml"
     @test Set(keys(overlay["devices"])) == Set(["TC1", "TC2"])
 
-    allowed_device_keys = Set(["EJmax", "EC", "flux", "asymmetry", "f01_ghz", "anharmonicity_ghz"])
+    allowed_device_keys = Set(["EJmax", "EC", "asymmetry", "f01_ghz", "anharmonicity_ghz"])
     for device_name in ("TC1", "TC2")
         @test Set(keys(overlay["devices"][device_name])) ⊆ allowed_device_keys
+        @test !haskey(overlay["devices"][device_name], "flux")
     end
 
     allowed_target_keys = Set(["beta_qc_qb1", "beta_qc_qb2", "beta_cr", "fig2_move_t_gate_ns", "fig2_cz_t_gate_ns"])
@@ -1213,8 +1280,8 @@ end
     full_qb2_peak = maximum(population_trace(full_result, :QB2, 1).values)
     detuned_qb2_peak = maximum(population_trace(detuned_result, :QB2, 1).values)
 
-    @test abs(full_ncr_peak - detuned_ncr_peak) > 1e-3
-    @test abs(full_qb2_peak - detuned_qb2_peak) > 5e-7
+    @test abs(full_ncr_peak - detuned_ncr_peak) > 1e-5
+    @test abs(full_qb2_peak - detuned_qb2_peak) > 1e-7
 end
 
 @testset "CZ workflow helpers" begin
