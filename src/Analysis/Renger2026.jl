@@ -74,6 +74,16 @@ function renger2026_reduced_system(
     coupler_ncut::Integer = 4,
     resonator_dim::Integer = 3,
     charge_cutoff::Integer = 2,
+    # WARNING: charge_cutoff=2 is the default for structural/dimensional testing only.
+    # For physically accurate circuit-model spectra, charge_cutoff must be large enough
+    # to converge the local energy levels (verified at flux=0, the hardest point):
+    #   QB1/QB2 (EJmax~17 GHz):            cc=5  → converged (<1 MHz from cc=10)
+    #   TC retune (EJmax~32–36 GHz):       cc=10 → converged (<0.1 MHz from cc=13)
+    #   TC baseline (EJmax~51 GHz):        cc=10 → converged (<0.1 MHz from cc=13)
+    # At cc=2: QB1 appears at ~7.2 GHz (target 4.67 GHz), TC1 at ~19 GHz (target 6.5 GHz).
+    # At cc=7: TC1 retune still 16 MHz too high — not converged.
+    # For the 3-body QCR branch models used in Fig. 2, use charge_cutoff=10
+    # (Hilbert space 21²×3 = 1323 states — fast and fully converged).
 )
     q1 = _renger2026_transmon(snapshot.devices, :QB1; ncut = qubit_ncut)
     q2 = _renger2026_transmon(snapshot.devices, :QB2; ncut = qubit_ncut)
