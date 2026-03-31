@@ -73,11 +73,22 @@ Key observations:
 
 cc=10 with 1323 states is fast to diagonalize. There is no reason to use a smaller cutoff.
 
-## Root Cause 2: TC1/TC2 baseline parameters are "weakly identified"
+## Root Cause 2: TC1/TC2 baseline EJmax values are wrong (~51 GHz → ~32-36 GHz)
 
-The `paper_local_priors.toml` has TC1/TC2 with EJmax=51.02 GHz, fitted only from the parked coupler frequency (f01=6.5 GHz) and anharmonicity (alpha=-0.11 GHz). This is underdetermined — many (EJmax, EC, asymmetry) triples give the same parked f01.
+The `paper_local_priors.toml` has TC1/TC2 with EJmax=51.02 GHz, but this value is **wrong**. It was fitted only from the parked coupler frequency (f01=6.5 GHz) and anharmonicity (alpha=-0.11 GHz), which is underdetermined — many (EJmax, EC, asymmetry) triples produce the same parked f01. The fitting chose an EJmax ~50% too high.
 
-The retune overlay (`fig2_ef_retune_working.toml`) reduces TC EJmax to ~32-36 GHz, a 35% reduction from baseline. The retune values were found by fitting to the MOVE/CZ avoided crossing morphology.
+### Baseline vs Retune parameter comparison
+
+| Parameter | TC1 baseline | TC1 retune | TC2 baseline | TC2 retune |
+|---|---|---|---|---|
+| EJmax (GHz) | 51.02 | **35.75** | 51.02 | **32.0** |
+| EC (GHz) | 0.107 | **0.105** | 0.107 | **0.105** |
+| asymmetry | 0.0 | **0.14** | 0.0 | **0.04** |
+| EJ/EC | ~477 | ~340 | ~477 | ~305 |
+
+The retune overlay (`fig2_ef_retune_working.toml`) reduces TC EJmax by 30-37%, which fundamentally changes the coupler's flux-tuning curve and avoided crossing positions. These retune values were found by fitting to the MOVE/CZ avoided crossing morphology in the ef-retune notebook.
+
+**Critical caveat**: The retune fitting was performed with charge_cutoff=3, which gave wrong energy levels (see Root Cause 1). The retune parameters may therefore need re-fitting with charge_cutoff=10 for self-consistent results.
 
 **The retune overlay must always be applied for Fig. 2 reproduction.** The baseline TC parameters are placeholders, not physical truth.
 
