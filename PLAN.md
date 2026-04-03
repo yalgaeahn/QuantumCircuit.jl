@@ -38,7 +38,7 @@ The current model surface includes two explicit Hamiltonian representations:
 - `ARCHITECTURE.md`: layer ownership, domain model, API boundaries
 - `ROADMAP.md`: implementation order and task sequence
 - `AGENT.md`: entrypoint and rules for coding agents
-- `PHASE3A.md`: detailed design for the first dynamics milestone
+- `ROADMAP.md` and `ARCHITECTURE.md`: detailed design and API boundaries for the first dynamics milestone
 
 ## Project Status
 

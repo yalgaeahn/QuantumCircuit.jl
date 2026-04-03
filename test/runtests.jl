@@ -620,6 +620,72 @@ end
     @test_throws ArgumentError minimum_gap(result; level_pair = (1, 5))
 end
 
+@testset "Eigensystem simulation" begin
+    q = Transmon(:q; EJ = 20.0, EC = 0.25, ncut = 5)
+    system = CompositeSystem(q)
+    esys = eigensystem(system; levels = 4)
+    spec = spectrum(system; levels = 4)
+
+    @test length(esys.energies) == 4
+    @test length(esys.states) == 4
+    @test issorted(esys.energies)
+    @test esys.energies ≈ spec.energies atol = 1e-10
+
+    tq = TunableTransmon(:tq; EJmax = 20.0, EC = 0.25, flux = 0.0, asymmetry = 0.0, ncut = 6)
+    sweep_spec = SweepSpec(:tq, :flux, [0.0, 0.15, 0.30]; levels = 4)
+    energy_sweep = simulate_sweep(CompositeSystem(tq), sweep_spec)
+    eigensystem_sweep = simulate_eigensystem_sweep(CompositeSystem(tq), sweep_spec)
+
+    @test eigensystem_sweep.values == energy_sweep.values
+    @test length(eigensystem_sweep.spectra) == length(energy_sweep.spectra)
+    @test length(eigensystem_sweep.spectra[1].states) == 4
+    @test transition_curve(eigensystem_sweep).data ≈ transition_curve(energy_sweep).data atol = 1e-10
+    @test minimum_gap(eigensystem_sweep).gap ≈ minimum_gap(energy_sweep).gap atol = 1e-10
+    @test minimum_gap(eigensystem_sweep).sweep_value == minimum_gap(energy_sweep).sweep_value
+end
+
+@testset "Bare-label lookup" begin
+    q = Transmon(:q; EJ = 20.0, EC = 0.25, ncut = 4)
+    r = Resonator(:r; ω = 6.05, dim = 3)
+    coupled_sys = CompositeSystem(q, r, CapacitiveCoupling(:q, :r; g = 0.02))
+    sweep = simulate_eigensystem_sweep(
+        coupled_sys,
+        SweepSpec(:q, :r, :g, [0.02, 0.60]; levels = 6),
+    )
+    basis = bare_product_basis(coupled_sys; subsystem_levels = Dict(:q => 3, :r => 2))
+    labeled = label_sweep(sweep, basis)
+
+    @test length(basis.subsystems) == 2
+    @test length(basis.labels) == 6
+    @test length(basis.states) == 6
+    @test length(labeled.label_maps) == 2
+
+    assigned = dressed_index(labeled, (1, 0), 1)
+    @test !ismissing(assigned)
+    @test bare_label(labeled, assigned, 1) == (1, 0)
+    @test energy_by_bare_label(labeled, (1, 0), 1) ≈ sweep.spectra[1].energies[assigned] atol = 1e-10
+
+    curve = energy_curve(labeled, (1, 0))
+    @test curve.values == sweep.values
+    @test curve.label == :bare_1_0
+    @test length(curve.data) == length(sweep.values)
+    @test curve.data[1] ≈ energy_by_bare_label(labeled, (1, 0), 1) atol = 1e-10
+
+    components = dressed_state_components(labeled, (1, 0), 1)
+    probabilities = last.(components)
+    @test !isempty(components)
+    @test issorted(probabilities; rev = true)
+    @test sum(probabilities) ≈ 1.0 atol = 1e-8
+    @test length(dressed_state_components(labeled, (1, 0), 1; top = 2)) == 2
+
+    strict_labeled = label_sweep(sweep, basis; overlap_threshold = 0.99)
+    @test count(ismissing, strict_labeled.label_maps[end].bare_to_dressed) > 0
+    missing_position = findfirst(ismissing, strict_labeled.label_maps[end].bare_to_dressed)
+    @test !isnothing(missing_position)
+    missing_curve = energy_curve(strict_labeled, strict_labeled.basis.labels[missing_position])
+    @test isnan(missing_curve.data[end])
+end
+
 @testset "README quickstart examples" begin
     q1 = Transmon(:q1; EJ = 20.0, EC = 0.25, ncut = 6)
     static_sys = CompositeSystem(q1)
@@ -1071,7 +1137,6 @@ end
 
 @testset "Renger 2026 workflow builders" begin
     snapshot = load_renger2026_snapshot()
-    snapshot_toml = TOML.parsefile(joinpath(dirname(@__DIR__), "output", "renger2026", "paper_local_priors.toml"))
     qr_stage = renger2026_stage1_qr_system(snapshot)
     qcr_stage = renger2026_stage1_qcr_system(snapshot)
     pair = renger2026_model_pair(snapshot)
@@ -1083,60 +1148,42 @@ end
     @test pair.effective.hamiltonian_spec isa EffectiveHamiltonianSpec
     @test pair.circuit.hamiltonian_spec isa CircuitHamiltonianSpec
     @test snapshot.targets["cr_f01_ghz"] == 4.3
-    @test snapshot.targets["cr_dressed_f01_ghz"] == 4.22
-    @test snapshot.targets["qb1_f01_ghz"] == 4.67
-    @test snapshot.targets["qb2_f01_ghz"] == 4.47
-    @test snapshot.targets["qb1_dressed_f01_ghz"] == 4.67
-    @test snapshot.targets["qb2_dressed_f01_ghz"] == 4.47
-    @test snapshot.targets["qb1_alpha_ghz"] == -0.187
-    @test snapshot.targets["qb2_alpha_ghz"] == -0.187
-    @test snapshot.targets["coupler_parked_f01_ghz"] == 6.5
-    @test isapprox(snapshot.targets["qb1_bare_f01_ghz"], snapshot.devices[:QB1]["f01_ghz"]; atol = 1e-6)
-    @test isapprox(snapshot.targets["qb2_bare_f01_ghz"], snapshot.devices[:QB2]["f01_ghz"]; atol = 1e-6)
     @test subsystems(qr_stage.system)[2].ω == 4.3
     @test subsystems(qcr_stage.system)[3].ω == 4.3
     @test snapshot.devices[:QB1]["fit_classification"] == "dressed_anchor_backout"
     @test snapshot.devices[:QB2]["fit_classification"] == "dressed_anchor_backout"
-    @test snapshot_toml["inference"]["qubit_fit_classification"] == "dressed_anchor_backout"
     @test snapshot.devices[:TC1]["flux"] == 0.0
     @test snapshot.devices[:TC2]["flux"] == 0.0
     @test snapshot.devices[:TC1]["asymmetry"] == 0.1
     @test snapshot.devices[:TC2]["asymmetry"] == 0.1
-    @test snapshot.targets["qb1_ej_ghz"] == 14.8
-    @test snapshot.targets["qb2_ej_ghz"] == 13.8
-    @test isapprox(snapshot.targets["qb1_ec_ghz"], 14.8 / 74.2; atol = 1e-12)
-    @test isapprox(snapshot.targets["qb2_ec_ghz"], 13.8 / 68.8; atol = 1e-12)
     @test isapprox(snapshot.devices[:QB1]["f01_ghz"], 4.6679; atol = 0.003)
     @test isapprox(snapshot.devices[:QB2]["f01_ghz"], 4.47033; atol = 0.003)
-    @test isapprox(snapshot.devices[:QB1]["anharmonicity_ghz"], -0.18669; atol = 0.002)
-    @test isapprox(snapshot.devices[:QB2]["anharmonicity_ghz"], -0.18692; atol = 0.002)
-    @test isapprox(snapshot.devices[:QB1]["fitted_dressed_f01_ghz"], snapshot.targets["qb1_dressed_f01_ghz"]; atol = 0.002)
-    @test isapprox(snapshot.devices[:QB2]["fitted_dressed_f01_ghz"], snapshot.targets["qb2_dressed_f01_ghz"]; atol = 0.002)
-    @test snapshot.devices[:QB1]["dressed_assignment_overlap"] > 0.9
-    @test snapshot.devices[:QB2]["dressed_assignment_overlap"] > 0.9
     @test isapprox(snapshot.devices[:TC1]["f01_ghz"], 6.5; atol = 0.02)
     @test isapprox(snapshot.devices[:TC2]["f01_ghz"], 6.5; atol = 0.02)
-    @test isapprox(snapshot.devices[:TC1]["anharmonicity_ghz"], -0.11; atol = 0.005)
-    @test isapprox(snapshot.devices[:TC2]["anharmonicity_ghz"], -0.11; atol = 0.005)
     @test snapshot.devices[:TC1]["EJmax"] > 50.0
     @test snapshot.devices[:TC2]["EJmax"] > 50.0
     @test isapprox(
-        snapshot.targets["g_qc_qb1_tc1"],
+        qr_stage.system.couplings[1].g,
+        snapshot.targets["beta_qr"] * sqrt(snapshot.devices[:QB1]["f01_ghz"] * snapshot.targets["cr_f01_ghz"]);
+        atol = 1e-4,
+    )
+    @test isapprox(
+        qcr_stage.system.couplings[1].g,
         snapshot.targets["beta_qc_qb1"] * sqrt(snapshot.devices[:QB1]["f01_ghz"] * snapshot.devices[:TC1]["f01_ghz"]);
         atol = 1e-4,
     )
     @test isapprox(
-        snapshot.targets["g_qc_qb2_tc2"],
+        pair.effective.system.couplings[4].g,
         snapshot.targets["beta_qc_qb2"] * sqrt(snapshot.devices[:QB2]["f01_ghz"] * snapshot.devices[:TC2]["f01_ghz"]);
         atol = 1e-4,
     )
     @test isapprox(
-        snapshot.targets["g_cr_tc1"],
+        qcr_stage.system.couplings[2].g,
         snapshot.targets["beta_cr"] * sqrt(snapshot.devices[:TC1]["f01_ghz"] * snapshot.targets["cr_f01_ghz"]);
         atol = 1e-4,
     )
     @test isapprox(
-        snapshot.targets["g_cr_tc2"],
+        pair.effective.system.couplings[3].g,
         snapshot.targets["beta_cr"] * sqrt(snapshot.devices[:TC2]["f01_ghz"] * snapshot.targets["cr_f01_ghz"]);
         atol = 1e-4,
     )

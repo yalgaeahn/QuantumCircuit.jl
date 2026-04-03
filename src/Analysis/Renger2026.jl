@@ -35,10 +35,9 @@ function renger2026_stage1_qr_system(
     qubit_ncut::Integer = 5,
     resonator_dim::Integer = 3,
 )
-    targets = snapshot.targets
     qubit_device = _renger2026_transmon(snapshot.devices, qubit; ncut = qubit_ncut)
-    resonator = Resonator(:CR; ω = Float64(targets["cr_f01_ghz"]), dim = resonator_dim)
-    coupling = CapacitiveCoupling(qubit, :CR; g = _g_qr(targets, qubit))
+    resonator = Resonator(:CR; ω = Float64(snapshot.targets["cr_f01_ghz"]), dim = resonator_dim)
+    coupling = CapacitiveCoupling(qubit, :CR; g = _g_qr(snapshot, qubit))
     return (; system = CompositeSystem(qubit_device, resonator, coupling), hamiltonian_spec = EffectiveHamiltonianSpec())
 end
 
@@ -50,12 +49,11 @@ function renger2026_stage1_qcr_system(
     coupler_ncut::Integer = 4,
     resonator_dim::Integer = 3,
 )
-    targets = snapshot.targets
     qubit_device = _renger2026_transmon(snapshot.devices, qubit; ncut = qubit_ncut)
     coupler_device = _renger2026_coupler(snapshot.devices, coupler; ncut = coupler_ncut)
-    resonator = Resonator(:CR; ω = Float64(targets["cr_f01_ghz"]), dim = resonator_dim)
-    g_qc = _g_qc(targets, qubit, coupler)
-    g_cr = _g_cr(targets, coupler)
+    resonator = Resonator(:CR; ω = Float64(snapshot.targets["cr_f01_ghz"]), dim = resonator_dim)
+    g_qc = _g_qc(snapshot, qubit, coupler)
+    g_cr = _g_cr(snapshot, coupler)
 
     system = CompositeSystem(
         qubit_device,
@@ -92,10 +90,10 @@ function renger2026_reduced_system(
     resonator = Resonator(:CR; ω = Float64(snapshot.targets["cr_f01_ghz"]), dim = resonator_dim)
 
     if model == :effective
-        g_q1c1 = _g_qc(snapshot.targets, :QB1, :TC1)
-        g_q2c2 = _g_qc(snapshot.targets, :QB2, :TC2)
-        g_c1r = _g_cr(snapshot.targets, :TC1)
-        g_c2r = _g_cr(snapshot.targets, :TC2)
+        g_q1c1 = _g_qc(snapshot, :QB1, :TC1)
+        g_q2c2 = _g_qc(snapshot, :QB2, :TC2)
+        g_c1r = _g_cr(snapshot, :TC1)
+        g_c2r = _g_cr(snapshot, :TC2)
 
         system = CompositeSystem(
             q1,
@@ -184,9 +182,28 @@ end
 
 _beta_qc(targets::Dict{String, Any}, qubit::Symbol) = qubit == :QB1 ? targets["beta_qc_qb1"] : targets["beta_qc_qb2"]
 _beta_cr(targets::Dict{String, Any}) = targets["beta_cr"]
-_g_qr(targets::Dict{String, Any}, qubit::Symbol) = qubit == :QB1 ? Float64(targets["g_qr_qb1"]) : qubit == :QB2 ? Float64(targets["g_qr_qb2"]) : throw(ArgumentError("Unsupported qubit $qubit for QR seed coupling."))
-_g_qc(targets::Dict{String, Any}, qubit::Symbol, coupler::Symbol) = qubit == :QB1 && coupler == :TC1 ? Float64(targets["g_qc_qb1_tc1"]) : qubit == :QB2 && coupler == :TC2 ? Float64(targets["g_qc_qb2_tc2"]) : throw(ArgumentError("Unsupported qubit-coupler pair ($qubit, $coupler) for QC seed coupling."))
-_g_cr(targets::Dict{String, Any}, coupler::Symbol) = coupler == :TC1 ? Float64(targets["g_cr_tc1"]) : coupler == :TC2 ? Float64(targets["g_cr_tc2"]) : throw(ArgumentError("Unsupported coupler $coupler for CR seed coupling."))
+
+_device_f01_ghz(devices::Dict{Symbol, Dict{String, Any}}, name::Symbol) = Float64(devices[name]["f01_ghz"])
+_effective_g(beta, ωa, ωb) = Float64(beta) * sqrt(Float64(ωa) * Float64(ωb))
+_target_or(targets::Dict{String, Any}, key::String, fallback) = haskey(targets, key) ? Float64(targets[key]) : Float64(fallback)
+
+function _g_qr(snapshot::Renger2026Snapshot, qubit::Symbol)
+    targets = snapshot.targets
+    key = qubit == :QB1 ? "g_qr_qb1" : qubit == :QB2 ? "g_qr_qb2" : throw(ArgumentError("Unsupported qubit $qubit for QR seed coupling."))
+    return _target_or(targets, key, _effective_g(targets["beta_qr"], _device_f01_ghz(snapshot.devices, qubit), targets["cr_f01_ghz"]))
+end
+
+function _g_qc(snapshot::Renger2026Snapshot, qubit::Symbol, coupler::Symbol)
+    key = qubit == :QB1 && coupler == :TC1 ? "g_qc_qb1_tc1" : qubit == :QB2 && coupler == :TC2 ? "g_qc_qb2_tc2" : throw(ArgumentError("Unsupported qubit-coupler pair ($qubit, $coupler) for QC seed coupling."))
+    fallback = _effective_g(_beta_qc(snapshot.targets, qubit), _device_f01_ghz(snapshot.devices, qubit), _device_f01_ghz(snapshot.devices, coupler))
+    return _target_or(snapshot.targets, key, fallback)
+end
+
+function _g_cr(snapshot::Renger2026Snapshot, coupler::Symbol)
+    key = coupler == :TC1 ? "g_cr_tc1" : coupler == :TC2 ? "g_cr_tc2" : throw(ArgumentError("Unsupported coupler $coupler for CR seed coupling."))
+    fallback = _effective_g(_beta_cr(snapshot.targets), _device_f01_ghz(snapshot.devices, coupler), snapshot.targets["cr_f01_ghz"])
+    return _target_or(snapshot.targets, key, fallback)
+end
 
 function _deep_merge_dict(base::Dict, overlay::Dict)
     merged = deepcopy(base)

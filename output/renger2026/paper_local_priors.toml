@@ -1,111 +1,46 @@
-paper = "Renger et al. (2026)"
-scope = "Local single-device priors for QB1-TC1-CR-TC2-QB2"
-notes = "QB1/QB2 use a parked reduced effective-model back-out: the paper dressed qubit frequencies (4.67/4.47 GHz) and local isolated qubit anharmonicity target (-0.187 GHz) anchor bare local EJmax/EC at flux = 0.0 and asymmetry = 0.10. Their device f01_ghz values remain exact isolated local bare frequencies derived from the current TunableTransmon model. Table II qubit EJ and EJ/EC are retained as paper metadata only. TC1/TC2 use parked isolated-device anchors f01 = 6.5 GHz and alpha ~= -0.11 GHz to refit EC/EJmax at flux = 0.0, while asymmetry remains prior-held at 0.10. CR uses a bare 4.3 GHz Hamiltonian input, while the paper's dressed 4.22 GHz reference is stored separately. Explicit effective g seeds are provisional coupled-fit initializations, not device truth."
-schema = "paper_local_priors_v1"
-source_notebook = "output/jupyter-notebook/renger2026-parameter-inference.ipynb"
-
 [devices.QB2]
-ncut = 15
-paper_dressed_f01_ghz = 4.47
-dressed_assignment_overlap = 0.995443
-anharmonicity_ghz = -0.18692
+type = "TunableTransmon"
+fit_classification = "dressed_anchor_backout"
 EC = 0.17
 EJmax = 15.88
 flux = 0.0
-target_alpha_ghz = -0.187
 ng = 0.0
-dressed_support_gap = 0.993497
-alpha_residual_mhz = 0.08
-charge_cutoff = 10
-dressed_residual_mhz = 0.57
 asymmetry = 0.1
-fitted_dressed_f01_ghz = 4.47057
-type = "TunableTransmon"
-fit_classification = "dressed_anchor_backout"
 f01_ghz = 4.47033
 
 [devices.TC2]
-ncut = 13
-residual_alpha_mhz = 0.28
-anharmonicity_ghz = -0.10972
+type = "TunableCoupler"
+fit_classification = "weakly identified"
 EC = 0.107
 EJmax = 51.02
 flux = 0.0
 ng = 0.0
-charge_cutoff = 10
 asymmetry = 0.1
-type = "TunableCoupler"
-fit_classification = "weakly identified"
 f01_ghz = 6.49991
 
 [devices.TC1]
-ncut = 13
-residual_alpha_mhz = 0.28
-anharmonicity_ghz = -0.10972
+type = "TunableCoupler"
+fit_classification = "weakly identified"
 EC = 0.107
 EJmax = 51.02
 flux = 0.0
 ng = 0.0
-charge_cutoff = 10
 asymmetry = 0.1
-type = "TunableCoupler"
-fit_classification = "weakly identified"
 f01_ghz = 6.49991
 
 [devices.QB1]
-ncut = 15
-paper_dressed_f01_ghz = 4.67
-dressed_assignment_overlap = 0.997247
-anharmonicity_ghz = -0.18669
+type = "TunableTransmon"
+fit_classification = "dressed_anchor_backout"
 EC = 0.1705
 EJmax = 17.21
 flux = 0.0
-target_alpha_ghz = -0.187
 ng = 0.0
-dressed_support_gap = 0.995731
-alpha_residual_mhz = 0.31
-charge_cutoff = 10
-dressed_residual_mhz = -0.15
 asymmetry = 0.1
-fitted_dressed_f01_ghz = 4.66985
-type = "TunableTransmon"
-fit_classification = "dressed_anchor_backout"
 f01_ghz = 4.6679
 
-[inference]
-qubit_fit_classification = "dressed_anchor_backout"
-coupler_fit_classification = "weakly identified"
-hamiltonian_spec = "CircuitHamiltonianSpec(charge_cutoff = 10)"
-qubit_backout_model = "parked reduced effective model with overlap-based dressed-mode assignment"
-sweet_spot_flux_target = 0.0
-asymmetry_prior_center = 0.1
-
 [targets]
+beta_qc_qb1 = 0.017
 beta_qc_qb2 = 0.022
 beta_cr = 0.0225
-g_qc_qb2_tc2 = 0.118589423073
-beta_qc_qb1 = 0.017
-qb2_dressed_f01_ghz = 4.47
-cr_dressed_f01_ghz = 4.22
-qb1_bare_f01_ghz = 4.6679
-qb2_ec_ghz = 0.20058139534883723
-qb1_ej_over_ec = 74.2
 beta_qr = 0.002
-coupler_alpha_prior_ghz = -0.11
-qb2_alpha_ghz = -0.187
-qb2_ej_ghz = 13.8
 cr_f01_ghz = 4.3
-qb1_f01_ghz = 4.67
-qb1_ec_ghz = 0.19946091644204852
-coupler_parked_f01_ghz = 6.5
-qb1_alpha_ghz = -0.187
-qb1_dressed_f01_ghz = 4.67
-g_cr_tc1 = 0.118951647647
-qb2_f01_ghz = 4.47
-qb2_ej_over_ec = 68.8
-qb1_ej_ghz = 14.8
-g_qc_qb1_tc1 = 0.093640479661
-g_qr_qb1 = 0.008960354986
-g_qr_qb2 = 0.008768671144
-g_cr_tc2 = 0.118951647647
-qb2_bare_f01_ghz = 4.47033

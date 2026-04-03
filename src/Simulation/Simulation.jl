@@ -1,6 +1,6 @@
 module Simulation
 
-using QuantumToolbox: eigenenergies, sesolve
+using QuantumToolbox: Ket, QuantumObject, eigenenergies, eigenstates, sesolve
 using ..Architecture: CompositeSystem, with_coupling_parameter, with_subsystem_parameter
 using ..Model:
     AbstractHamiltonianSpec,
@@ -11,23 +11,34 @@ using ..Model:
     SubsystemDrive,
     _embedded_operator,
     _time_dependent_hamiltonian,
+    basis_state,
     build_model,
     hamiltonian
 
 export CouplingSweepTarget,
     DynamicsResult,
+    EigensystemResult,
+    EigensystemSweepResult,
     ObservableTrace,
     SpectrumResult,
     SubsystemSweepTarget,
     SweepResult,
     SweepSpec,
+    eigensystem,
     evolve,
+    simulate_eigensystem_sweep,
     simulate_sweep,
     spectrum
 
 struct SpectrumResult{M}
     model::M
     energies::Vector{Float64}
+end
+
+struct EigensystemResult{M, S}
+    model::M
+    energies::Vector{Float64}
+    states::Vector{S}
 end
 
 abstract type AbstractSweepTarget end
@@ -49,6 +60,13 @@ struct SweepSpec{Target<:AbstractSweepTarget, T}
 end
 
 struct SweepResult{Spec, T, Result}
+    base_system::CompositeSystem
+    spec::Spec
+    values::Vector{T}
+    spectra::Vector{Result}
+end
+
+struct EigensystemSweepResult{Spec, T, Result}
     base_system::CompositeSystem
     spec::Spec
     values::Vector{T}
@@ -105,6 +123,25 @@ function spectrum(
     return spectrum(build_model(system; hamiltonian_spec = hamiltonian_spec); levels = levels)
 end
 
+function eigensystem(model::StaticSystemModel; levels::Integer = 6)
+    levels > 0 || throw(ArgumentError("levels must be a positive integer."))
+    eigensolve = eigenstates(hamiltonian(model))
+    energies = Float64.(real.(eigensolve.values))
+    order = sortperm(energies)
+    levels <= length(order) || throw(ArgumentError("levels exceeds the available Hilbert-space dimension."))
+    dims = basis_state(model).dims
+    ordered_states = [QuantumObject(eigensolve.vectors[:, index]; type = Ket(), dims = dims) for index in order[1:levels]]
+    return EigensystemResult(model, energies[order][1:levels], ordered_states)
+end
+
+function eigensystem(
+    system::CompositeSystem;
+    levels::Integer = 6,
+    hamiltonian_spec::AbstractHamiltonianSpec = EffectiveHamiltonianSpec(),
+)
+    return eigensystem(build_model(system; hamiltonian_spec = hamiltonian_spec); levels = levels)
+end
+
 function simulate_sweep(
     system::CompositeSystem,
     spec::SweepSpec;
@@ -118,6 +155,21 @@ function simulate_sweep(
         ) for value in spec.values
     ]
     return SweepResult(system, spec, copy(spec.values), spectra)
+end
+
+function simulate_eigensystem_sweep(
+    system::CompositeSystem,
+    spec::SweepSpec;
+    hamiltonian_spec::AbstractHamiltonianSpec = EffectiveHamiltonianSpec(),
+)
+    spectra = [
+        eigensystem(
+            _apply_sweep(system, spec.target, spec.parameter, value);
+            levels = spec.levels,
+            hamiltonian_spec = hamiltonian_spec,
+        ) for value in spec.values
+    ]
+    return EigensystemSweepResult(system, spec, copy(spec.values), spectra)
 end
 
 function _apply_sweep(system::CompositeSystem, target::SubsystemSweepTarget, parameter::Symbol, value)
