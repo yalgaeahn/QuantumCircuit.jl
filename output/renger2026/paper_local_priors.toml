@@ -1,26 +1,21 @@
 [devices.QB2]
 type = "TunableTransmon"
-fit_classification = "dressed_anchor_backout"
 EC = 0.17
 EJmax = 15.88
-flux = 0.0
 ng = 0.0
 asymmetry = 0.1
 f01_ghz = 4.47033
 
 [devices.TC2]
 type = "TunableCoupler"
-fit_classification = "weakly identified"
 EC = 0.107
 EJmax = 51.02
-flux = 0.0
 ng = 0.0
 asymmetry = 0.1
 f01_ghz = 6.49991
 
 [devices.TC1]
 type = "TunableCoupler"
-fit_classification = "weakly identified"
 EC = 0.107
 EJmax = 51.02
 flux = 0.0
@@ -30,7 +25,6 @@ f01_ghz = 6.49991
 
 [devices.QB1]
 type = "TunableTransmon"
-fit_classification = "dressed_anchor_backout"
 EC = 0.1705
 EJmax = 17.21
 flux = 0.0
@@ -38,9 +32,4 @@ ng = 0.0
 asymmetry = 0.1
 f01_ghz = 4.6679
 
-[targets]
-beta_qc_qb1 = 0.017
-beta_qc_qb2 = 0.022
-beta_cr = 0.0225
-beta_qr = 0.002
-cr_f01_ghz = 4.3
+

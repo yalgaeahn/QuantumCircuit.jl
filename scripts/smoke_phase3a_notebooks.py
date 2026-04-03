@@ -10,9 +10,8 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-NOTEBOOKS = [
-    REPO_ROOT / "output" / "jupyter-notebook" / "phase3a-closed-system-dynamics-walkthrough.ipynb",
-    REPO_ROOT / "output" / "jupyter-notebook" / "phase3a-circuit-hamiltonian-dynamics.ipynb",
+TUTORIAL_NOTEBOOKS = [
+    REPO_ROOT / "output" / "jupyter-notebook" / "flux-tunable-transmon-tutorial.ipynb",
 ]
 
 
@@ -55,20 +54,20 @@ def run_notebook(notebook_path: Path) -> None:
 
 
 def main() -> int:
-    missing = [path for path in NOTEBOOKS if not path.is_file()]
+    missing = [path for path in TUTORIAL_NOTEBOOKS if not path.is_file()]
     if missing:
         for path in missing:
             print(f"Missing notebook: {path}", file=sys.stderr)
         return 1
 
     try:
-        for notebook_path in NOTEBOOKS:
+        for notebook_path in TUTORIAL_NOTEBOOKS:
             run_notebook(notebook_path)
     except (subprocess.CalledProcessError, ValueError) as exc:
         print(exc, file=sys.stderr)
         return 1
 
-    print("Phase 3A notebook smoke verification passed.")
+    print("Tutorial notebook smoke verification passed.")
     return 0
 
 
