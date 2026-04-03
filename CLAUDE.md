@@ -16,8 +16,6 @@ All 320 tests should pass.
 - `src/Analysis/Renger2026.jl` — model builders, snapshot loading, `renger2026_model_pair()`
 - `output/renger2026/paper_local_priors.toml` — baseline device parameters (QB1/QB2 identified, TC1/TC2 weakly identified)
 - `output/renger2026/fig2_ef_retune_working.toml` — retune overlay with corrected TC params (must be applied for Fig. 2)
-- `output/jupyter-notebook/renger2026-figure2-cdef-reproduction.ipynb` — main Fig. 2 reproduction notebook
-- `output/jupyter-notebook/renger2026-figure2-ef-retune.ipynb` — TC parameter retune workflow
 - `output/jupyter-notebook/renger2026_fig2_branch_helpers.jl` — 1518-line helper for flux sweeps, branch specs, gate dynamics
 
 ## Architecture
@@ -39,11 +37,11 @@ Dependency flow: `Architecture -> Model -> Simulation -> Analysis`
 
 The Fig. 2 reproduction failed due to **charge_cutoff being too small** in the circuit Hamiltonian. This caused all subsystem energy levels to be wrong by hundreds of MHz to several GHz, making every downstream result (avoided crossings, gate dynamics) physically incorrect.
 
-## Root Cause 1 (Primary): charge_cutoff=3 gave completely wrong energy levels
+## Root Cause 1 (Primary): the old notebook-based Fig. 2 workflow used charge_cutoff=3 and gave completely wrong energy levels
 
 `CircuitHamiltonianSpec(charge_cutoff=N)` truncates the charge basis to `2N+1` states per transmon-like subsystem. For deep transmons (high EJ/EC), many charge states are needed to resolve the cosine potential.
 
-Both Fig. 2 notebooks used `charge_cutoff=3`, which was catastrophically inadequate:
+The removed notebook-based Fig. 2 workflow used `charge_cutoff=3`, which was catastrophically inadequate:
 
 ### Convergence data (isolated subsystem, flux=0)
 
@@ -86,7 +84,7 @@ The `paper_local_priors.toml` has TC1/TC2 with EJmax=51.02 GHz, but this value i
 | asymmetry | 0.0 | **0.14** | 0.0 | **0.04** |
 | EJ/EC | ~477 | ~340 | ~477 | ~305 |
 
-The retune overlay (`fig2_ef_retune_working.toml`) reduces TC EJmax by 30-37%, which fundamentally changes the coupler's flux-tuning curve and avoided crossing positions. These retune values were found by fitting to the MOVE/CZ avoided crossing morphology in the ef-retune notebook.
+The retune overlay (`fig2_ef_retune_working.toml`) reduces TC EJmax by 30-37%, which fundamentally changes the coupler's flux-tuning curve and avoided crossing positions. These retune values came from the removed notebook-based retune workflow.
 
 **Critical caveat**: The retune fitting was performed with charge_cutoff=3, which gave wrong energy levels (see Root Cause 1). The retune parameters may therefore need re-fitting with charge_cutoff=10 for self-consistent results.
 
@@ -108,29 +106,13 @@ For accurate physics: use 3-body QCR branch models (QB+TC+CR, 1323 states at cc=
 
 ## Root Cause 5: QB1/QB2 back-out uses approximate effective model
 
-The qubit parameters (EJmax, EC) were inferred from paper-reported dressed frequencies using a "parked reduced effective model" (Duffing approximation). The residuals are small (<1 MHz), so this is not a major issue. However, the inference was done with charge_cutoff=10 for the circuit model validation, while the Fig. 2 notebooks used charge_cutoff=3 — making the validation meaningless.
-
----
-
-# What was fixed (committed to main)
-
-## PR #1: Fix charge_cutoff in Renger 2026 Fig. 2 notebooks: 3 -> 10
-
-### Code changes
-- `renger2026-figure2-cdef-reproduction.ipynb` Cell 2: `FIG2_CHARGE_CUTOFF = 3` -> `10`
-- `renger2026-figure2-ef-retune.ipynb` Cell 2: `RETUNE_CHARGE_CUTOFF = 3` -> `10`
-- `src/Analysis/Renger2026.jl`: added convergence warning comment to `renger2026_reduced_system`
-
-### Documentation changes (follow-up commit on main)
-- Cell 0 (markdown): Runtime Profile updated from `charge_cutoff = 3` to `charge_cutoff = 10`
-- Cell 17 (markdown): truncation check description updated from cc=3/cc=4 to cc=10/cc=13
-- Cell 18 (code): truncation check runs at cc=13 instead of cc=4, variable names `cutoff3/cutoff4` -> `cutoff10/cutoff13`
+The qubit parameters (EJmax, EC) were inferred from paper-reported dressed frequencies using a "parked reduced effective model" (Duffing approximation). The residuals are small (<1 MHz), so this is not a major issue. However, the inference was done with charge_cutoff=10 for the circuit model validation, while the removed notebook workflow used charge_cutoff=3 — making that validation meaningless.
 
 ---
 
 # Remaining work
 
-1. **Re-run the Fig. 2 notebooks end-to-end** with the corrected charge_cutoff=10 and verify:
+1. **Rebuild the Fig. 2 reproduction stack end-to-end** with charge_cutoff=10 and verify:
    - Fig. 2(c)(d) avoided crossings appear at qualitatively correct flux positions
    - Fig. 2(e) MOVE gate shows population transfer QB1 -> CR -> QB1
    - Fig. 2(f) CZ gate shows entangling phase accumulation
