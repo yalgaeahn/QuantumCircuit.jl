@@ -35,7 +35,7 @@ Secondary constraints retained for later joint fitting:
 - Coupler anharmonicity prior: `alpha_c ~= -0.11 GHz`
 - Coupler parked flux is fixed at `0.0`
 - Coupler asymmetry remains prior-held at `0.10`
-- Explicit effective `g_*` seeds are frozen into the snapshot as provisional coupled-fit initialization values.
+- Effective `g_*` couplings are derived downstream from `beta_*`, local bare `f01`, and `CR` bare `f01` unless explicitly overridden by an overlay.
 
 If Appendix C conflicts with Table II, Table II wins for this local-parameter task.
 
@@ -60,7 +60,7 @@ Interpretation rules:
 
 ## Accepted Local Prior Set
 
-The frozen snapshot is stored in `output/renger2026/paper_local_priors.toml` as `paper_local_priors_v1`.
+The frozen snapshot is stored in `output/renger2026/paper_local_priors.toml` as a minimal local-prior baseline.
 
 Accepted values:
 
@@ -71,12 +71,10 @@ Accepted values:
 
 Acceptance notes:
 
-- The qubit device `f01_ghz` values are the isolated local bare frequencies derived from the current exact model.
-- The qubit dressed paper references are stored separately in snapshot targets and are matched by the parked reduced effective model.
-- The qubit device `anharmonicity_ghz` values are matched directly to the local isolated target `-0.187 GHz`.
-- The qubit device `EJ/EC` values no longer equal the Table II entries; those remain snapshot metadata only.
+- The device sections retain only the local prior parameters and the derived bare `f01_ghz` values needed downstream.
+- The qubit dressed paper references and Table II metadata are notebook-side provenance, not part of the frozen baseline snapshot.
 - All accepted parking points sit at the flux sweet spot in the local model.
 - The coupler parameters reproduce parked isolated `f01 ~= 6.5 GHz`.
 - The coupler parameters reproduce `alpha_c ~= -0.11 GHz`.
 - Coupler asymmetry remains prior-held at `0.10`; only `EC/EJmax` are newly anchored by the parked local solve.
-- Weak isolated coupler `f01` values must not be reused to regenerate downstream effective couplings.
+- Downstream effective couplings should be regenerated from the retained `beta_*` values plus local bare frequencies.

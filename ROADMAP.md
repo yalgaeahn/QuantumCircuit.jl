@@ -230,7 +230,7 @@ Exit criteria:
 - the baseline and circuit-mode Phase 3A notebooks pass smoke verification
 
 See also:
-- `PHASE3A.md` for the implementation-level API and type design
+- `ARCHITECTURE.md` for the layer ownership and API boundaries behind the Phase 3A implementation
 
 ## Phase 3B: Open-System Dynamics
 

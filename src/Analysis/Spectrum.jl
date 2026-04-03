@@ -2,6 +2,10 @@ function transition_frequencies(result::SpectrumResult)
     return diff(result.energies)
 end
 
+function transition_frequencies(result::EigensystemResult)
+    return diff(result.energies)
+end
+
 function anharmonicity(result::SpectrumResult)
     length(result.energies) >= 3 || throw(ArgumentError("anharmonicity requires at least three energy levels."))
     ω01 = _transition_frequency(result, 1, 2)
@@ -9,7 +13,19 @@ function anharmonicity(result::SpectrumResult)
     return ω12 - ω01
 end
 
+function anharmonicity(result::EigensystemResult)
+    length(result.energies) >= 3 || throw(ArgumentError("anharmonicity requires at least three energy levels."))
+    ω01 = _transition_frequency(result, 1, 2)
+    ω12 = _transition_frequency(result, 2, 3)
+    return ω12 - ω01
+end
+
 function _transition_frequency(result::SpectrumResult, lower::Integer, upper::Integer)
+    _validate_level_pair(lower, upper, length(result.energies))
+    return result.energies[upper] - result.energies[lower]
+end
+
+function _transition_frequency(result::EigensystemResult, lower::Integer, upper::Integer)
     _validate_level_pair(lower, upper, length(result.energies))
     return result.energies[upper] - result.energies[lower]
 end
